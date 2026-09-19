@@ -5,8 +5,9 @@ import { PerformanceView, Tile, PerfDetail, Mini, Segment, Stat, Chart } from "p
 import { Space, Block, LegendItem } from "space.slint";
 import { SettingsView, SettingsPage, SettingItem } from "settings.slint";
 import { DockerView, DockerPage, DockerRow, DockerKV } from "docker.slint";
+import { ProxyView, ProxyPage, ProxyRow, ProxyKV } from "proxy.slint";
 
-export { Theme, DockerPage, DockerRow, DockerKV, LegendItem, Cols, HeadInfo, SettingsPage, SettingItem, Space, Block, Hover, Marker, Series, ProcRow, ProcDetail, Totals, Link, Tile, PerfDetail, Mini, Segment, Stat, Chart }
+export { Theme, DockerPage, DockerRow, DockerKV, ProxyPage, ProxyRow, ProxyKV, LegendItem, Cols, HeadInfo, SettingsPage, SettingItem, Space, Block, Hover, Marker, Series, ProcRow, ProcDetail, Totals, Link, Tile, PerfDetail, Mini, Segment, Stat, Chart }
 
 /// The system tray icon. Hover shows a live summary; click opens the window.
 export component Tray inherits SystemTrayIcon {
@@ -290,6 +291,9 @@ export component AppWindow inherits Window {
                 vertical-stretch: 1;
             }
             if !root.settings-open && root.current-id == "docker": DockerView {
+                vertical-stretch: 1;
+            }
+            if !root.settings-open && root.current-id == "proxy": ProxyView {
                 vertical-stretch: 1;
             }
             if !root.settings-open && root.current-id == "performance": PerformanceView {

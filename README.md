@@ -48,7 +48,7 @@ for the trust model.
 - Performance tab: reorder/hide device tiles, CPU detail (total/thread/core), **history length (10 min / 1 h / 24 h)**, spike sensitivity, °C/°F
 - Space map: default drive, scan priority, hidden files, excluded folders, **colour by folder / file type / age**, remember scans
 - Tray: what the hover summary shows
-- Tabs: turn optional tabs on or off (Performance, Docker) — live, no restart
+- Tabs: turn optional tabs on or off (Performance, Docker, Proxy) — live, no restart
 - Saved as plain text at `~/.config/sophon/settings.conf`
 
 **Admin features** (optional, opt-in)
@@ -78,6 +78,11 @@ itself is not a tab — it's the ☰ button beside the theme toggle.
   containers or rename it. Requires a socket proxy on each server —
   see **[docs/docker.md](docs/docker.md)**. Builds with `--no-default-features`
   leave Docker out entirely.
+- **Proxy (Nginx Proxy Manager)**: every host your NPM routes — domains,
+  forward target and port, enabled state, certificate status with expiry —
+  with connect-right-in-the-tab setup. Read-only (login, list hosts, list
+  certificates); your NPM login is stored only in this machine's settings file.
+  For offline testing: `cargo run --release -p sophon-npm --example npm-mock`
 
 ## Resource use
 

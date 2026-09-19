@@ -381,6 +381,8 @@ fn sync_settings_open(ui: &mut Ui) {
     ui.shared.processes_visible.store(id == "processes", Relaxed);
     #[cfg(feature = "docker")]
     crate::docker_panel::set_visible(id == "docker");
+    #[cfg(feature = "proxy")]
+    crate::proxy_panel::set_visible(id == "proxy");
     if !open && id == "processes" {
         let _ = ui.shared.wake.send(());
     }
@@ -500,6 +502,8 @@ impl Ui {
         self.shared.processes_visible.store(id == "processes", Relaxed);
         #[cfg(feature = "docker")]
         crate::docker_panel::set_visible(id == "docker");
+        #[cfg(feature = "proxy")]
+        crate::proxy_panel::set_visible(id == "proxy");
         if id == "processes" {
             // The process table isn't refreshed while hidden behind another tab.
             let _ = self.shared.wake.send(());

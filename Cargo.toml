@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/sophon-core", "crates/sophon-app", "crates/sophon-docker"]
+members = ["crates/sophon-core", "crates/sophon-app", "crates/sophon-docker", "crates/sophon-net", "crates/sophon-npm"]
 
 [workspace.package]
 version = "0.2.0"

@@ -15,6 +15,8 @@ mod admin;
 mod panels;
 #[cfg(feature = "docker")]
 mod docker_panel;
+#[cfg(feature = "proxy")]
+mod proxy_panel;
 mod ebpf;
 mod helper;
 mod settings_page;
@@ -87,6 +89,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     settings_page::install(&app, shared.clone());
     #[cfg(feature = "docker")]
     docker_panel::install(&app);
+    #[cfg(feature = "proxy")]
+    proxy_panel::install(&app);
     // Data-driven tab bar from the panel registry.
     let reg = panels::panels();
     let labels: Vec<slint::SharedString> = reg.iter().map(|p| p.title.into()).collect();

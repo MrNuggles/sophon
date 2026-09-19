@@ -11,17 +11,19 @@ path = "src/main.rs"
 [dependencies]
 sophon-core = { path = "../sophon-core" }
 sophon-docker = { path = "../sophon-docker", optional = true }
+sophon-npm = { path = "../sophon-npm", optional = true }
 libc = "0.2"
 slint = { version = "1.18", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-software", "renderer-femtovg", "unstable-winit-030", "system-tray"] }
 # Not used directly: turns on runtime-loaded fontconfig inside Slint (no fontconfig-devel needed).
 fontique = { version = "0.11", default-features = false, features = ["system", "fontconfig-dlopen"] }
 
 [features]
-# Optional feature tabs. "docker" is on by default (the tab itself still ships
-# disabled — enable it in Settings → Tabs). `--no-default-features` builds
+# Optional feature tabs, on by default. The tabs themselves still ship
+# disabled — enable them in Settings → Tabs. `--no-default-features` builds
 # without any network code at all.
-default = ["docker"]
+default = ["docker", "proxy"]
 docker = ["dep:sophon-docker"]
+proxy = ["dep:sophon-npm"]
 
 [build-dependencies]
 slint-build = "1.18"

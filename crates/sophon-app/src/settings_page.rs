@@ -515,6 +515,15 @@ fn build(s: &Settings, p: &Page) -> Vec<SettingItem> {
         s.tabs_docker,
         d.tabs_docker,
     ));
+    #[cfg(feature = "proxy")]
+    v.push(toggle(
+        c,
+        "tabs_proxy",
+        "Proxy (Nginx Proxy Manager)",
+        "Show the Proxy tab: every host your NPM routes, with its target, port and certificate status. Off by default; while hidden, nothing at all is fetched. The login you give it is stored only in this machine's settings file.",
+        s.tabs_proxy,
+        d.tabs_proxy,
+    ));
     v
 }
 
@@ -527,6 +536,7 @@ fn set_bool(s: &mut Settings, id: &str, v: bool) {
         "admin_on_start" => s.admin_on_start = v,
         "tabs_performance" => s.tabs_performance = v,
         "tabs_docker" => s.tabs_docker = v,
+        "tabs_proxy" => s.tabs_proxy = v,
         "accent_follow" => s.accent_follow = v,
         "graph_grid" => s.graph_grid = v,
         "show_own_usage" => s.show_own_usage = v,
@@ -648,6 +658,7 @@ fn get_bool(s: &Settings, id: &str) -> Option<bool> {
         "admin_on_start" => s.admin_on_start,
         "tabs_performance" => s.tabs_performance,
         "tabs_docker" => s.tabs_docker,
+        "tabs_proxy" => s.tabs_proxy,
         "accent_follow" => s.accent_follow,
         "graph_grid" => s.graph_grid,
         "show_own_usage" => s.show_own_usage,

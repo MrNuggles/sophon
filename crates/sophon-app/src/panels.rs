@@ -30,6 +30,10 @@ pub fn panels() -> Vec<Panel> {
     if crate::settings::get(|s| s.tabs_docker) {
         v.push(Panel { id: "docker", title: "Docker" });
     }
+    #[cfg(feature = "proxy")]
+    if crate::settings::get(|s| s.tabs_proxy) {
+        v.push(Panel { id: "proxy", title: "Proxy" });
+    }
     v
 }
 

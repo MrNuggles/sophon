@@ -1,12 +1,11 @@
-//! Docker Engine API client for Sophon: a tiny, dependency-free HTTP/1.1 + JSON
-//! layer plus container models and operations. Talks plain HTTP to a Docker
+//! Docker Engine API client for Sophon: container models and operations over
+//! the shared HTTP/JSON layer in sophon-net. Talks plain HTTP to a Docker
 //! socket proxy on the LAN — never the raw socket over TCP (see SECURITY.md).
 //!
 //! Only the endpoints Sophon needs are used: list containers, and start / stop
 //! / restart. A matching socket-proxy allowlist is `CONTAINERS=1 POST=1`.
 
-pub mod http;
-pub mod json;
+pub use sophon_net::{http, json};
 
 use json::Value;
 

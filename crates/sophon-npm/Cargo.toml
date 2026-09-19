@@ -1,0 +1,11 @@
+[package]
+name = "sophon-npm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# Nginx Proxy Manager API client for Sophon: proxy hosts (and their
+# certificates) over the shared HTTP/JSON layer in sophon-net. Std only.
+# See docs/npm.md for the access Sophon needs.
+[dependencies]
+sophon-net = { path = "../sophon-net" }

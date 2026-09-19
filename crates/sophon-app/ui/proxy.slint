@@ -1,0 +1,352 @@
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { Btn, Icon, IconButton } from "widgets.slint";
+
+export struct ProxyKV {
+    label: string,
+    value: string,
+}
+
+export struct ProxyRow {
+    /// 0 = host row, 1 = expanded detail.
+    kind: int,
+    id: int,
+    domain: string,
+    /// "+2" when the host routes more domains than the one shown.
+    extra-domains: string,
+    /// "http://192.168.1.10:8096"
+    target: string,
+    enabled: bool,
+    /// "SSL" / "SSL forced" / "HTTP" / "Cert expired".
+    ssl-label: string,
+    /// 0 good (green) · 1 warn (orange) · 2 plain (dim) · 3 bad (red).
+    ssl-tone: int,
+    expanded: bool,
+    // Detail row (kind 1):
+    facts: [ProxyKV],
+}
+
+export global ProxyPage {
+    in property <[ProxyRow]> rows;
+    in property <string> summary;
+    /// A connection is configured (url + email + password saved).
+    in property <bool> configured;
+    in property <bool> connecting;
+    in property <bool> failed;
+    /// Form feedback: a validation error or the last poll error.
+    in property <string> status;
+    /// The saved values, so the form comes back prefilled.
+    in property <string> url;
+    in property <string> email;
+    in property <bool> empty;
+    callback connect(string, string, string);
+    callback forget();
+    callback refresh();
+    callback toggle(int);
+}
+
+component HostRow inherits Rectangle {
+    in property <ProxyRow> item;
+    callback toggle();
+    height: 48px;
+    function ssl-color(tone: int) -> color {
+        return tone == 0 ? Theme.gpu : tone == 1 ? Theme.disk : tone == 3 ? Theme.danger : Theme.faint;
+    }
+    background: root.item.expanded ? Theme.surface-2 : ta.has-hover ? Theme.hover : transparent;
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.toggle();
+        }
+    }
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 14px;
+        spacing: 10px;
+        Rectangle {
+            width: 14px;
+            Icon {
+                width: 13px;
+                height: 13px;
+                icon: root.item.expanded ? "M 6 9 L 12 15 L 18 9" : "M 9 6 L 15 12 L 9 18";
+                color: Theme.dim;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 9px;
+                height: 9px;
+                border-radius: 4.5px * Theme.round;
+                background: root.item.enabled ? Theme.gpu : Theme.faint;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            spacing: 2px;
+            HorizontalLayout {
+                spacing: 8px;
+                Text {
+                    text: root.item.domain;
+                    font-size: 13.5px * Theme.font-scale;
+                    font-weight: 600;
+                    color: root.item.enabled ? Theme.text : Theme.faint;
+                    overflow: elide;
+                }
+                if root.item.extra-domains != "": Text {
+                    text: root.item.extra-domains;
+                    font-size: 11px * Theme.font-scale;
+                    color: Theme.faint;
+                    vertical-alignment: center;
+                }
+            }
+            Text {
+                text: root.item.target;
+                font-size: 11px * Theme.font-scale;
+                color: Theme.dim;
+                overflow: elide;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            Text {
+                text: root.item.ssl-label;
+                font-size: 11.5px * Theme.font-scale;
+                font-weight: 600;
+                color: root.ssl-color(root.item.ssl-tone);
+                horizontal-alignment: right;
+            }
+        }
+    }
+}
+
+component DetailPanel inherits Rectangle {
+    in property <ProxyRow> item;
+    background: Theme.surface-2;
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: Theme.border;
+    }
+    HorizontalLayout {
+        padding-left: 36px;
+        padding-right: 16px;
+        padding-top: 12px;
+        padding-bottom: 14px;
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 5px;
+            alignment: start;
+            for f in root.item.facts: HorizontalLayout {
+                spacing: 12px;
+                Text {
+                    width: 120px;
+                    text: f.label;
+                    font-size: 11.5px * Theme.font-scale;
+                    color: Theme.dim;
+                }
+                Text {
+                    horizontal-stretch: 1;
+                    text: f.value;
+                    font-size: 11.5px * Theme.font-scale;
+                    color: Theme.text;
+                    wrap: word-wrap;
+                }
+            }
+        }
+    }
+}
+
+component FormField inherits Rectangle {
+    in property <string> placeholder;
+    in property <bool> secret: false;
+    in-out property <string> text;
+    callback accepted();
+    width: field-width;
+    height: 34px;
+    border-radius: 8px * Theme.round;
+    background: Theme.surface-2;
+    border-width: 1px;
+    border-color: input.has-focus ? Theme.accent : Theme.border;
+    property <length> field-width: 240px;
+    if input.text == "": Text {
+        x: 10px;
+        text: root.placeholder;
+        color: Theme.faint;
+        font-size: 12.5px * Theme.font-scale;
+    }
+    input := TextInput {
+        x: 10px;
+        width: parent.width - 20px;
+        height: parent.height;
+        vertical-alignment: center;
+        single-line: true;
+        color: Theme.text;
+        font-size: 13px * Theme.font-scale;
+        input-type: root.secret ? InputType.password : InputType.text;
+        text <=> root.text;
+        accepted => {
+            root.accepted();
+        }
+    }
+    public function focus-input() {
+        input.focus();
+    }
+}
+
+component ConnectForm inherits Rectangle {
+    callback connect(string, string, string);
+    property <string> error-text: ProxyPage.status;
+    border-radius: 10px * Theme.round;
+    background: Theme.surface;
+    border-width: 1px;
+    border-color: Theme.border;
+    height: form.preferred-height + 44px;
+    form := VerticalLayout {
+        padding: 22px;
+        spacing: 12px;
+        Text {
+            text: "Connect to Nginx Proxy Manager";
+            font-size: 15px * Theme.font-scale;
+            font-weight: 600;
+            color: Theme.text;
+        }
+        Text {
+            text: "The admin port of your NPM install (default 81). Your login is kept in Sophon's settings file on this machine only — a dedicated NPM user is a good idea.";
+            width: 560px;
+            wrap: word-wrap;
+            font-size: 12.5px * Theme.font-scale;
+            color: Theme.dim;
+        }
+        HorizontalLayout {
+            spacing: 10px;
+            url := FormField {
+                placeholder: "http://192.168.1.209:81";
+                text <=> ProxyPage.url;
+                accepted => {
+                    email.focus-input();
+                }
+            }
+            email := FormField {
+                placeholder: "email";
+                text <=> ProxyPage.email;
+                accepted => {
+                    pass.focus-input();
+                }
+            }
+            pass := FormField {
+                placeholder: "password";
+                secret: true;
+                accepted => {
+                    root.connect(url.text, email.text, pass.text);
+                }
+            }
+            Btn {
+                text: "Connect";
+                primary: true;
+                clicked => {
+                    root.connect(url.text, email.text, pass.text);
+                }
+            }
+        }
+        if root.error-text != "": Text {
+            text: root.error-text;
+            font-size: 12.5px * Theme.font-scale;
+            color: Theme.danger;
+        }
+    }
+}
+
+export component ProxyView inherits Rectangle {
+    VerticalLayout {
+        // Header.
+        VerticalLayout {
+            padding-left: 18px;
+            padding-right: 14px;
+            padding-top: 12px;
+            padding-bottom: 8px;
+            spacing: 8px;
+            HorizontalLayout {
+                spacing: 10px;
+                Text {
+                    text: "Proxy";
+                    font-size: 20px * Theme.font-scale;
+                    font-weight: 700;
+                    color: Theme.text;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: ProxyPage.summary;
+                    font-size: 12px * Theme.font-scale;
+                    color: Theme.dim;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                if ProxyPage.configured: IconButton {
+                    icon: "M 20 11 A 8 8 0 1 0 19 15 M 20 5 L 20 11 L 14 11";
+                    clicked => {
+                        ProxyPage.refresh();
+                    }
+                }
+                if ProxyPage.configured: IconButton {
+                    icon: "M 6 6 L 18 18 M 18 6 L 6 18";
+                    clicked => {
+                        ProxyPage.forget();
+                    }
+                }
+            }
+        }
+        ScrollView {
+            VerticalLayout {
+                padding: 14px;
+                padding-top: 4px;
+                spacing: 8px;
+                alignment: start;
+                if !ProxyPage.configured || ProxyPage.failed: ConnectForm {
+                    connect(u, e, p) => {
+                        ProxyPage.connect(u, e, p);
+                    }
+                }
+                if ProxyPage.configured && !ProxyPage.failed && ProxyPage.connecting: Text {
+                    text: "Connecting to NPM…";
+                    font-size: 13px * Theme.font-scale;
+                    color: Theme.dim;
+                }
+                if ProxyPage.configured && !ProxyPage.failed && !ProxyPage.connecting && ProxyPage.empty: Rectangle {
+                    height: 90px;
+                    border-radius: 10px * Theme.round;
+                    background: Theme.surface-2;
+                    border-width: 1px;
+                    border-color: Theme.border;
+                    VerticalLayout {
+                        alignment: center;
+                        Text {
+                            text: "No proxy hosts configured in NPM.";
+                            font-size: 13px * Theme.font-scale;
+                            color: Theme.dim;
+                            horizontal-alignment: center;
+                        }
+                    }
+                }
+                if ProxyPage.configured && !ProxyPage.failed && !ProxyPage.connecting && !ProxyPage.empty: VerticalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    for row in ProxyPage.rows: Rectangle {
+                        height: row.kind == 0 ? 48px : detail.preferred-height;
+                        if row.kind == 0: HostRow {
+                            item: row;
+                            toggle => {
+                                ProxyPage.toggle(row.id);
+                            }
+                        }
+                        detail := DetailPanel {
+                            visible: row.kind == 1;
+                            item: row;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

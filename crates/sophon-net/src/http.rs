@@ -1,6 +1,7 @@
-//! A tiny blocking HTTP/1.1 client for the Docker socket proxy (plain HTTP on
-//! the LAN). Handles `Content-Length`, chunked transfer, and read-to-close.
-//! No TLS (the proxy is plain HTTP on a trusted network — see SECURITY.md).
+//! A tiny blocking HTTP/1.1 client for the JSON APIs on Sophon's own LAN
+//! (Docker socket proxies, Nginx Proxy Manager). Handles `Content-Length`,
+//! chunked transfer, bearer auth and JSON bodies. No TLS — these endpoints are
+//! plain HTTP on a trusted network (see SECURITY.md).
 
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
@@ -37,14 +38,24 @@ const TIMEOUT: Duration = Duration::from_secs(4);
 const MAX_BODY: usize = 8 * 1024 * 1024;
 
 pub fn get(host: &str, port: u16, path: &str) -> Result<Response, Error> {
-    request("GET", host, port, path)
+    request("GET", host, port, path, &[], None)
+}
+
+/// GET with a bearer token (JSON APIs that authenticate per request).
+pub fn get_auth(host: &str, port: u16, path: &str, token: &str) -> Result<Response, Error> {
+    request("GET", host, port, path, &[("Authorization", &format!("Bearer {token}"))], None)
 }
 
 pub fn post(host: &str, port: u16, path: &str) -> Result<Response, Error> {
-    request("POST", host, port, path)
+    request("POST", host, port, path, &[], None)
 }
 
-fn request(method: &str, host: &str, port: u16, path: &str) -> Result<Response, Error> {
+/// POST (or another method) with a JSON body.
+pub fn request_with_body(method: &str, host: &str, port: u16, path: &str, json_body: &str) -> Result<Response, Error> {
+    request(method, host, port, path, &[("Content-Type", "application/json")], Some(json_body))
+}
+
+fn request(method: &str, host: &str, port: u16, path: &str, headers: &[(&str, &str)], body: Option<&str>) -> Result<Response, Error> {
     let addr = (host, port)
         .to_socket_addrs()
         .map_err(|e| Error::Connect(e.to_string()))?
@@ -55,9 +66,18 @@ fn request(method: &str, host: &str, port: u16, path: &str) -> Result<Response, 
     stream.set_write_timeout(Some(TIMEOUT)).ok();
 
     // `Connection: close` lets us read to EOF without keep-alive bookkeeping.
-    let req = format!(
-        "{method} {path} HTTP/1.1\r\nHost: {host}\r\nAccept: application/json\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-    );
+    let mut req = format!("{method} {path} HTTP/1.1\r\nHost: {host}\r\nAccept: application/json\r\n");
+    for (key, value) in headers {
+        req.push_str(&format!("{key}: {value}\r\n"));
+    }
+    match body {
+        Some(b) => req.push_str(&format!("Content-Length: {}\r\n", b.len())),
+        None => req.push_str("Content-Length: 0\r\n"),
+    }
+    req.push_str("Connection: close\r\n\r\n");
+    if let Some(b) = body {
+        req.push_str(b);
+    }
     stream.write_all(req.as_bytes()).map_err(|e| Error::Io(e.to_string()))?;
 
     let mut raw = Vec::with_capacity(8192);

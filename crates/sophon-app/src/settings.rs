@@ -129,10 +129,16 @@ pub struct Settings {
     pub docker_sort: usize,
     pub docker_sort_desc: bool,
     // Optional tabs (Settings → Tabs). "processes" is permanent (the app's
-    // dashboard). A tab must also be compiled in (--features docker) before
+    // dashboard). A tab must also be compiled in (--features) before
     // its toggle appears.
     pub tabs_performance: bool,
     pub tabs_docker: bool,
+    pub tabs_proxy: bool,
+    // Nginx Proxy Manager (feature "proxy"). The credentials live only in
+    // this file, which is written owner-only (0600).
+    pub npm_url: String,
+    pub npm_email: String,
+    pub npm_password: String,
 }
 
 pub const UPDATE_MS: [u64; 5] = [500, 1000, 2000, 5000, 0];
@@ -211,6 +217,10 @@ impl Default for Settings {
             docker_sort_desc: false,
             tabs_performance: true,
             tabs_docker: false,
+            tabs_proxy: false,
+            npm_url: String::new(),
+            npm_email: String::new(),
+            npm_password: String::new(),
         }
     }
 }
@@ -253,7 +263,14 @@ impl Settings {
 
     pub fn save(&self) {
         let _ = std::fs::create_dir_all(config_dir());
-        let _ = std::fs::write(Self::path(), self.serialize());
+        let path = Self::path();
+        let _ = std::fs::write(&path, self.serialize());
+        // The file can hold credentials (npm.*): keep it owner-only.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        }
     }
 
     pub fn column_width(&self, id: &str) -> u32 {
@@ -358,6 +375,10 @@ impl Settings {
                 "docker.sort_desc" => self.docker_sort_desc = b(),
                 "tabs.performance" => self.tabs_performance = b(),
                 "tabs.docker" => self.tabs_docker = b(),
+                "tabs.proxy" => self.tabs_proxy = b(),
+                "npm.url" => self.npm_url = value.to_string(),
+                "npm.email" => self.npm_email = value.to_string(),
+                "npm.password" => self.npm_password = value.to_string(),
                 _ => {}
             }
         }
@@ -459,6 +480,10 @@ impl Settings {
         kv("docker.sort_desc", self.docker_sort_desc.to_string());
         kv("tabs.performance", self.tabs_performance.to_string());
         kv("tabs.docker", self.tabs_docker.to_string());
+        kv("tabs.proxy", self.tabs_proxy.to_string());
+        kv("npm.url", self.npm_url.clone());
+        kv("npm.email", self.npm_email.clone());
+        kv("npm.password", self.npm_password.clone());
         o
     }
 }

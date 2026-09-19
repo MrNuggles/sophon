@@ -3939,6 +3939,7 @@ dependencies = [
  "slint-build",
  "sophon-core",
  "sophon-docker",
+ "sophon-npm",
 ]
 
 [[package]]
@@ -3951,6 +3952,20 @@ dependencies = [
 [[package]]
 name = "sophon-docker"
 version = "0.2.0"
+dependencies = [
+ "sophon-net",
+]
+
+[[package]]
+name = "sophon-net"
+version = "0.2.0"
+
+[[package]]
+name = "sophon-npm"
+version = "0.2.0"
+dependencies = [
+ "sophon-net",
+]
 
 [[package]]
 name = "spin_on"

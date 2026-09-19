@@ -1,0 +1,9 @@
+[package]
+name = "sophon-net"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# The hand-rolled HTTP/1.1 + JSON layer shared by Sophon's API clients
+# (sophon-docker, sophon-npm). Std only, like everything else here.
+[dependencies]

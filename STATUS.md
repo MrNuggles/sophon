@@ -14,8 +14,8 @@ security model, [SECURITY.md](SECURITY.md).
   panel system, and the optional Docker tab.
 - **Build:** clean in both configs (`cargo build --release` and
   `--features docker`); no warnings.
-- **Tests:** 30 passing (7 app + 13 core + 10 docker).
-- **Size:** ~14k lines across three crates.
+- **Tests:** 34 passing (7 app + 13 core + 5 net + 5 docker + 4 npm).
+- **Size:** ~16k lines across five crates.
 - **Footprint:** ~25 MB RAM, ~1.2% of one core with the window open, ~0.13% in
   the tray. Sampler ~2.6 ms CPU/tick.
 
@@ -72,6 +72,16 @@ start / stop / restart (stopping asks first). Right-click a header to
 show/hide its containers or rename the server. Live updates; add/remove servers
 in-tab; hide the whole tab from Settings → Tabs (its poller then parks).
 
+**Proxy tab (optional, off by default)** — talks to Nginx Proxy Manager's API
+(admin port, default 81): every proxy host with its domains, forward target
+and port, enabled state and certificate status (expiry shown, flagged red when
+lapsed). Enable it in Settings → Tabs and connect with your NPM login right in
+the tab — credentials live only in this machine's settings file (written 0600)
+and the client is read-only (login, list hosts, list certificates — nothing
+else). Refresh / forget buttons in the header; click a row for full details.
+Ships with a mock NPM API for offline testing (`sophon-npm --example
+npm-mock`).
+
 ## Verified vs. not verified
 
 - **Verified here:** all builds, 30 unit tests, every view rendered to PNG
@@ -83,7 +93,9 @@ in-tab; hide the whole tab from Settings → Tabs (its poller then parks).
   showed no control requests). Toggling the tab off and on from Settings → Tabs
   was verified live (tab bar rebuilds, data re-fetches; screenshot pair).
   The dashboard layout (Processes permanent, ☰ settings button, Tabs defaults)
-  is likewise snapshot-verified from a fresh config.
+  is likewise snapshot-verified from a fresh config. The Proxy tab was
+  verified against the npm-mock: connect form → login → loaded table (the
+  mock's log shows one login, then token reuse across polls).
 - **Verified by you:** the Docker tab against both of your real servers
   (2026-09-19).
 - **Needs your hands (couldn't test from here):**
@@ -116,6 +128,11 @@ in-tab; hide the whole tab from Settings → Tabs (its poller then parks).
     respectively); Settings moved out of the tab bar to a ☰ header button;
     Docker became a default Cargo feature.
 
+12. **Proxy tab** — Nginx Proxy Manager client + tab (the third optional tab):
+    connect form in-tab, proxy hosts with certificates, credentials stored
+    locally (settings file now 0600); HTTP/JSON layer extracted to
+    `sophon-net` for both clients.
+
 ## Open decisions / next steps
 
 - [ ] Packaging for distribution: install the binary to a **root-owned** path
@@ -129,8 +146,10 @@ in-tab; hide the whole tab from Settings → Tabs (its poller then parks).
 
 ```
 crates/sophon-core     UI-free sampler (libc only)
-crates/sophon-docker   optional Docker client (std only; feature "docker")
-crates/sophon-app      Slint GUI (binary "sophon")
+crates/sophon-net     shared HTTP/JSON layer (std only)
+crates/sophon-docker  Docker client (std only; default feature)
+crates/sophon-npm     Nginx Proxy Manager client (std only; default feature)
+crates/sophon-app     Slint GUI (binary "sophon")
 CLAUDE.md   the two rules + working notes      SPEC.md     full build blueprint
 README.md   features + build                   SECURITY.md trust model
 docs/docker.md  Docker + socket-proxy setup    STATUS.md   this file

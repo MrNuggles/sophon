@@ -46,6 +46,10 @@ enum Step {
     /// opens the inline edit needs a live mouse).
     #[cfg(feature = "docker")]
     DockerRenameServer(&'static str),
+    /// Fills the Proxy tab's connect form and submits it (only run when no
+    /// real connection is configured, so a mock can't clobber real settings).
+    #[cfg(feature = "proxy")]
+    ProxyConnect(&'static str, &'static str, &'static str),
     /// Opens or closes the Settings overlay (it lives outside the tab bar).
     SettingsOpen(bool),
     /// Switches to the tab with this panel id, resolved at run time (tab
@@ -108,6 +112,29 @@ pub fn start(app: &AppWindow, dir: PathBuf) {
             Step::TabId("processes"),
             Step::Wait,
             Step::Shot("live-docker-off"),
+            Step::SettingsOpen(false),
+        ]);
+    }
+    // Proxy tab (feature builds): ships disabled — enable it, see the connect
+    // form, then connect to a local npm-mock (only when no real connection is
+    // configured) and shoot the loaded table.
+    #[cfg(feature = "proxy")]
+    {
+        steps.extend([Step::SettingsOpen(true), Step::SetToggle("tabs_proxy", true)]);
+        steps.extend([Step::TabId("proxy"), Step::Wait, Step::Shot("proxy-connect")]);
+        if !crate::settings::get(|s| !s.npm_url.is_empty()) {
+            steps.extend([Step::ProxyConnect("http://127.0.0.1:2381", "sophon@mock", "mockpass")]);
+            steps.extend(std::iter::repeat_with(|| Step::Wait).take(6));
+            steps.push(Step::Shot("proxy"));
+        }
+        // Off again from Settings: defaults preserved.
+        steps.extend([
+            Step::SettingsOpen(true),
+            Step::SetToggle("tabs_proxy", false),
+            Step::Wait,
+            Step::TabId("processes"),
+            Step::Wait,
+            Step::Shot("live-proxy-off"),
             Step::SettingsOpen(false),
         ]);
     }
@@ -198,6 +225,10 @@ pub fn start(app: &AppWindow, dir: PathBuf) {
             Some(Step::DockerToggleServer) => app.global::<crate::DockerPage>().invoke_toggle_server(0),
             #[cfg(feature = "docker")]
             Some(Step::DockerRenameServer(name)) => app.global::<crate::DockerPage>().invoke_rename_server(0, name.into()),
+            #[cfg(feature = "proxy")]
+            Some(Step::ProxyConnect(url, email, pass)) => {
+                app.global::<crate::ProxyPage>().invoke_connect(url.into(), email.into(), pass.into());
+            }
             Some(Step::SettingsOpen(open)) => app.set_settings_open(open),
             Some(Step::TabId(id)) => {
                 let t = crate::panels::panels().iter().position(|p| p.id == id).unwrap_or(0) as i32;
