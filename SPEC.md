@@ -632,45 +632,61 @@ SOPHON_SNAPSHOT=/tmp/shots ./target/release/sophon      # render every view to P
 SOPHON_DEBUG=1 ./target/release/sophon                  # log visibility/frames/UI cost
 ```
 
-## 11. Modular panels & the Docker tab
+## 11. Modular panels & the Docker tab (feature `docker`, off by default)
 
 **Panel registry.** Tabs are registered in `sophon-app/src/panels.rs`:
 `panels()` returns an ordered `Vec<Panel { id, title }>`, feature-gated for
-optional tabs. `id_at(index)` resolves an index to a panel id. The tab bar in
+optional tabs; `id_at(index)` resolves an index to a panel id. The tab bar in
 `app.slint` is data-driven (`tab-labels` / `tab-ids` models set from the
 registry); each body is `if root.current-id == "<id>": <View> {}`. Nothing else
 hard-codes a tab number — the sampler learns "is the process tab visible" from a
-`Shared.processes_visible` atomic, not an index. **Adding a tab = (1) one entry
-in `panels()`, (2) one install call in `main.rs` (`#[cfg]`'d if optional),
-(3) one `if` line + import in `app.slint`.** Removing = delete those. Optional
-panels are behind Cargo features so a default build has no trace of them.
+`Shared.processes_visible` atomic. **Adding a tab = (1) one entry in `panels()`,
+(2) one install call in `main.rs` (`#[cfg]`'d if optional), (3) one `if` line +
+import in `app.slint`.** Removing = delete those. Optional panels sit behind
+Cargo features, so a default build contains none of their code (the base build
+has no network code at all).
 
-**Docker crate (`sophon-docker`, dependency-free).**
+**Docker crate (`sophon-docker`, dependency-free — libc-free even; std only).**
 - `http.rs` — a tiny blocking HTTP/1.1 client over `TcpStream` (connect + r/w
-  timeouts). Sends `GET`/`POST` with `Connection: close`; parses status +
-  headers, handling `Content-Length`, chunked transfer, and read-to-close.
-  Caps body size (8 MB) and total time (4 s). Plain HTTP only (no TLS — it
-  targets a socket proxy on a trusted LAN).
+  timeouts, 4 s budget). `GET`/`POST` with `Connection: close`; parses status +
+  headers, handling `Content-Length`, chunked transfer, and read-to-close; caps
+  body at 8 MB. Plain HTTP only (no TLS — it targets a socket proxy on a trusted
+  LAN).
 - `json.rs` — a minimal recursive-descent JSON parser (`Value` enum), UTF-8
-  correct, with a recursion-depth cap. Enough for the Docker API.
-- `lib.rs` — `Server { name, host, port }` (`parse("host:port")`), `Container`
-  (id, name, image, state, status, ports), `list(server)` →
-  `GET /containers/json?all=1`, and `action(server, id, "start"|"stop"|
-  "restart")` → `POST /containers/{id}/{op}` (id validated ASCII-alphanumeric;
-  204/304 = success). Friendly messages for 403 (proxy allowlist) etc.
+  correct, with a recursion-depth cap.
+- `lib.rs` — `Server { name, host, port }` (`parse("host:port")`);
+  `Container { id, name, image, state, status, ports, created }` with
+  `lowest_port()`; `Stats { cpu_pct, mem_used, mem_limit }`; `Details { command,
+  restart_policy, health, networks, mounts, env_count, started_at }`. Endpoints:
+  `list` → `GET /containers/json?all=1`; `stats` → `GET
+  /containers/{id}/stats?stream=false` (CPU% computed from cpu/precpu deltas ×
+  online cpus; memory = usage − inactive_file); `inspect` → `GET
+  /containers/{id}/json`; `action(op)` → `POST /containers/{id}/{start|stop|
+  restart}` (204/304 = ok). Container ids are validated ASCII-alphanumeric before
+  reaching a request line; friendly messages for 403 (proxy allowlist) etc.
 
-**Docker panel (`sophon-app/src/docker_panel.rs`, feature `docker`).** Owns a
-poller thread that lists every configured server, sorts containers running-first,
-and delivers results to the UI via `invoke_from_event_loop`. Polls every 2 s
-while the tab is visible, 15 s otherwise (Rule 1); woken early on actions/config
-changes. `docker.slint` renders server-header rows (name, connection status,
-refresh + remove) and container rows (state dot, name, image, published ports as
-`host→container/proto`, status, and start/stop/restart buttons + context menu),
-plus an add-server form. Servers persist in settings as `docker.server =
-name|host:port`. **Connectivity is a socket proxy over plain HTTP; never the raw
-Docker socket over TCP — see docs/docker.md and SECURITY.md.**
+**Docker panel (`sophon-app/src/docker_panel.rs`).** A poller thread lists every
+configured server (2 s while the tab is visible, 15 s otherwise; woken early on
+actions/config changes) and delivers `ServerState`s to the UI via
+`invoke_from_event_loop`. **Per-container `stats`/`inspect` are fetched only for
+expanded rows — plus all running containers while sorting by CPU/RAM — and only
+while the tab is visible** (Rule 1). The controller keeps short per-container
+CPU/memory history rings (for the expanded graphs) and the latest stats (for
+usage sorting), pruned as containers come and go. `docker.slint` renders a sort
+bar (Ports/Name/State/Age/CPU/RAM, direction toggle; default Ports = lowest
+published host port first), server-header rows (name, connection status, refresh
++ remove), container rows (expand chevron, state dot, name, image, ports as
+`host→container/proto`, status, start/stop/restart buttons + context menu), and,
+when a row is expanded, a detail panel with **live CPU + memory graphs** (reusing
+the `Graph` widget) and a facts grid (image, id, command, restart policy, health,
+network IPs, mounts, env count, all ports). Multiple rows expand at once. Servers
+persist in settings (`docker.server = name|host:port`); the sort persists too.
+The header summary/`configured` flag key off the **configured server count**, not
+transient poll state, so it never reads "No servers yet" while connected.
+**Connectivity is a socket proxy over plain HTTP; never the raw Docker socket
+over TCP — see docs/docker.md and SECURITY.md.**
 
-## 10. What is deliberately not done yet
+## 12. What is deliberately not done yet
 Steam/Proton game grouping with cover art; app icons from the icon theme;
 pause/resume an app (`cgroup.freeze`) and atomic `cgroup.kill`; priority/affinity
 controls; per-process disk I/O; NVIDIA/Intel GPU backends; keyboard navigation

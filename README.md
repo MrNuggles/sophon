@@ -8,8 +8,9 @@ A Windows-style task manager for Linux that stays out of your games' way.
 
 ![Processes](docs/screenshots/processes.png)
 
-See **[SPEC.md](SPEC.md)** for a complete from-scratch build specification
-(architecture, data sources, algorithms, exact procfs/sysfs formats).
+See **[STATUS.md](STATUS.md)** for current project status, **[SPEC.md](SPEC.md)**
+for a complete from-scratch build specification, and **[SECURITY.md](SECURITY.md)**
+for the trust model.
 
 ## Features
 
