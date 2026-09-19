@@ -126,6 +126,8 @@ pub struct Settings {
     pub tip_net: bool,
     // Docker (feature "docker"). Each is (display name, "host:port").
     pub docker_servers: Vec<(String, String)>,
+    pub docker_sort: usize,
+    pub docker_sort_desc: bool,
 }
 
 pub const UPDATE_MS: [u64; 5] = [500, 1000, 2000, 5000, 0];
@@ -200,6 +202,8 @@ impl Default for Settings {
             tip_temps: true,
             tip_net: false,
             docker_servers: Vec::new(),
+            docker_sort: 0,
+            docker_sort_desc: false,
         }
     }
 }
@@ -343,6 +347,8 @@ impl Settings {
                         self.docker_servers.push((n.trim().to_string(), a.trim().to_string()));
                     }
                 }
+                "docker.sort" => self.docker_sort = n(),
+                "docker.sort_desc" => self.docker_sort_desc = b(),
                 _ => {}
             }
         }
@@ -440,6 +446,8 @@ impl Settings {
         for (name, addr) in &self.docker_servers {
             kv("docker.server", format!("{name}|{addr}"));
         }
+        kv("docker.sort", self.docker_sort.to_string());
+        kv("docker.sort_desc", self.docker_sort_desc.to_string());
         o
     }
 }

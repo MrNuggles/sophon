@@ -4,9 +4,9 @@ import { ProcessesView, ProcRow, ProcDetail, Totals, Link, Cols, HeadInfo } from
 import { PerformanceView, Tile, PerfDetail, Mini, Segment, Stat, Chart } from "performance.slint";
 import { Space, Block, LegendItem } from "space.slint";
 import { SettingsView, SettingsPage, SettingItem } from "settings.slint";
-import { DockerView, DockerPage, DockerRow } from "docker.slint";
+import { DockerView, DockerPage, DockerRow, DockerKV } from "docker.slint";
 
-export { Theme, DockerPage, DockerRow, LegendItem, Cols, HeadInfo, SettingsPage, SettingItem, Space, Block, Hover, Marker, Series, ProcRow, ProcDetail, Totals, Link, Tile, PerfDetail, Mini, Segment, Stat, Chart }
+export { Theme, DockerPage, DockerRow, DockerKV, LegendItem, Cols, HeadInfo, SettingsPage, SettingItem, Space, Block, Hover, Marker, Series, ProcRow, ProcDetail, Totals, Link, Tile, PerfDetail, Mini, Segment, Stat, Chart }
 
 /// The system tray icon. Hover shows a live summary; click opens the window.
 export component Tray inherits SystemTrayIcon {

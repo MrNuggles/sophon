@@ -1,38 +1,50 @@
 import { ScrollView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
-import { Btn, Icon, Avatar } from "widgets.slint";
+import { Btn, Icon, Series, Graph } from "widgets.slint";
+
+export struct DockerKV {
+    label: string,
+    value: string,
+}
 
 export struct DockerRow {
-    /// 0 = server header, 1 = container.
+    /// 0 = server header, 1 = container, 2 = expanded detail.
     kind: int,
     server: int,
     id: string,
     name: string,
     image: string,
-    /// running / exited / created / paused / restarting / dead.
     state: string,
     state-color: color,
     status: string,
     ports: string,
     running: bool,
-    selected: bool,
-    /// Server header only: connection state text + whether it errored.
+    expanded: bool,
+    // Server header (kind 0):
     server-status: string,
     server-error: bool,
+    // Expanded detail (kind 2):
+    cpu-series: Series,
+    cpu-text: string,
+    mem-series: Series,
+    mem-text: string,
+    facts: [DockerKV],
 }
 
 export global DockerPage {
     in property <[DockerRow]> rows;
     in property <string> summary;
-    /// True once at least one server is configured.
     in property <bool> configured;
-    in property <string> selected-id;
-    /// Container action: op in "start" | "stop" | "restart".
+    in property <int> sort;
+    in property <bool> sort-desc;
+    /// Container action: "start" | "stop" | "restart".
     callback action(string, string);
     /// Server op: "refresh" | "remove", with the server index.
     callback server-op(int, string);
     callback add-server(string, string);
-    callback select(string);
+    /// Expand or collapse a container by id.
+    callback toggle(string);
+    callback set-sort(int);
 }
 
 component StateDot inherits Rectangle {
@@ -45,7 +57,6 @@ component StateDot inherits Rectangle {
 
 component ActionBtn inherits Rectangle {
     in property <string> icon;
-    in property <string> tip;
     in property <color> tint;
     callback clicked;
     width: 30px;
@@ -66,15 +77,41 @@ component ActionBtn inherits Rectangle {
     }
 }
 
+component SortChip inherits Rectangle {
+    in property <string> text;
+    in property <bool> active;
+    in property <bool> desc;
+    callback clicked;
+    height: 28px;
+    min-width: label.preferred-width + 26px;
+    border-radius: 14px * Theme.round;
+    background: root.active ? Theme.accent.with-alpha(0.16) : ta.has-hover ? Theme.hover : transparent;
+    border-width: 1px;
+    border-color: root.active ? Theme.accent.with-alpha(0.55) : Theme.border;
+    label := Text {
+        x: 12px;
+        text: root.text + (root.active ? (root.desc ? "  ↓" : "  ↑") : "");
+        font-size: 12px * Theme.font-scale;
+        color: root.active ? Theme.accent : Theme.dim;
+        vertical-alignment: center;
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
 component ContainerRow inherits Rectangle {
     in property <DockerRow> item;
     callback act(string);
-    callback select();
+    callback toggle();
     height: 52px;
-    background: root.item.selected ? Theme.selected : ta.has-hover ? Theme.hover : transparent;
+    background: root.item.expanded ? Theme.surface-2 : ta.has-hover ? Theme.hover : transparent;
     ta := TouchArea {
         clicked => {
-            root.select();
+            root.toggle();
         }
     }
     ContextMenuArea {
@@ -93,9 +130,18 @@ component ContainerRow inherits Rectangle {
             }
         }
         HorizontalLayout {
-            padding-left: 20px;
+            padding-left: 12px;
             padding-right: 14px;
-            spacing: 12px;
+            spacing: 10px;
+            Rectangle {
+                width: 14px;
+                Icon {
+                    width: 13px;
+                    height: 13px;
+                    icon: root.item.expanded ? "M 6 9 L 12 15 L 18 9" : "M 9 6 L 15 12 L 9 18";
+                    color: Theme.dim;
+                }
+            }
             VerticalLayout {
                 alignment: center;
                 StateDot {
@@ -138,7 +184,6 @@ component ContainerRow inherits Rectangle {
                     horizontal-alignment: right;
                 }
             }
-            // Actions: start (if down) or restart (if up), and stop.
             VerticalLayout {
                 alignment: center;
                 HorizontalLayout {
@@ -164,6 +209,87 @@ component ContainerRow inherits Rectangle {
                             root.act("stop");
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+component MiniGraph inherits VerticalLayout {
+    in property <string> label;
+    in property <string> value;
+    in property <Series> series;
+    in property <color> tint;
+    spacing: 4px;
+    HorizontalLayout {
+        Text {
+            text: root.label;
+            font-size: 11px * Theme.font-scale;
+            color: Theme.dim;
+        }
+        Text {
+            text: root.value;
+            font-size: 11px * Theme.font-scale;
+            font-weight: 600;
+            color: Theme.text;
+            horizontal-alignment: right;
+        }
+    }
+    Graph {
+        height: 70px;
+        a: root.series;
+        color-a: root.tint;
+    }
+}
+
+component DetailPanel inherits Rectangle {
+    in property <DockerRow> item;
+    background: Theme.surface-2;
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: Theme.border;
+    }
+    HorizontalLayout {
+        padding-left: 36px;
+        padding-right: 16px;
+        padding-top: 12px;
+        padding-bottom: 14px;
+        spacing: 20px;
+        VerticalLayout {
+            width: 300px;
+            spacing: 12px;
+            MiniGraph {
+                label: "CPU";
+                value: root.item.cpu-text;
+                series: root.item.cpu-series;
+                tint: Theme.cpu;
+            }
+            MiniGraph {
+                label: "Memory";
+                value: root.item.mem-text;
+                series: root.item.mem-series;
+                tint: Theme.mem;
+            }
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 5px;
+            alignment: start;
+            for f in root.item.facts: HorizontalLayout {
+                spacing: 12px;
+                Text {
+                    width: 120px;
+                    text: f.label;
+                    font-size: 11.5px * Theme.font-scale;
+                    color: Theme.dim;
+                }
+                Text {
+                    horizontal-stretch: 1;
+                    text: f.value;
+                    font-size: 11.5px * Theme.font-scale;
+                    color: Theme.text;
+                    wrap: word-wrap;
                 }
             }
         }
@@ -221,8 +347,6 @@ component ServerHeader inherits Rectangle {
 }
 
 component AddServerForm inherits Rectangle {
-    property <string> name-text;
-    property <string> addr-text;
     height: 56px;
     border-radius: 10px * Theme.round;
     background: Theme.surface;
@@ -293,14 +417,16 @@ component AddServerForm inherits Rectangle {
 }
 
 export component DockerView inherits Rectangle {
-    HorizontalLayout {
+    property <[string]> sort-keys: ["Ports", "Name", "State", "Age", "CPU", "RAM"];
+    VerticalLayout {
+        // Header + sort bar.
         VerticalLayout {
-            horizontal-stretch: 1;
+            padding-left: 18px;
+            padding-right: 14px;
+            padding-top: 12px;
+            padding-bottom: 8px;
+            spacing: 8px;
             HorizontalLayout {
-                padding-left: 18px;
-                padding-right: 14px;
-                padding-top: 12px;
-                padding-bottom: 10px;
                 spacing: 10px;
                 Text {
                     text: "Docker";
@@ -317,58 +443,80 @@ export component DockerView inherits Rectangle {
                     horizontal-stretch: 1;
                 }
             }
-            ScrollView {
-                VerticalLayout {
-                    padding: 14px;
-                    padding-top: 4px;
-                    spacing: 8px;
-                    alignment: start;
-                    if !DockerPage.configured: Rectangle {
-                        height: 120px;
-                        border-radius: 10px * Theme.round;
-                        background: Theme.surface-2;
-                        border-width: 1px;
-                        border-color: Theme.border;
-                        VerticalLayout {
-                            alignment: center;
-                            spacing: 6px;
-                            Text {
-                                text: "Connect to a server running Docker";
-                                font-size: 15px * Theme.font-scale;
-                                font-weight: 600;
-                                color: Theme.text;
-                                horizontal-alignment: center;
-                            }
-                            Text {
-                                text: "Point Sophon at a docker-socket-proxy on your LAN. It lists containers live and can start, stop and restart them.";
-                                width: 520px;
-                                wrap: word-wrap;
-                                font-size: 12.5px * Theme.font-scale;
-                                color: Theme.dim;
-                                horizontal-alignment: center;
-                            }
-                        }
-                    }
-                    for row[i] in DockerPage.rows: Rectangle {
-                        height: row.kind == 0 ? 40px : 52px;
-                        if row.kind == 0: ServerHeader {
-                            item: row;
-                            op(o) => {
-                                DockerPage.server-op(row.server, o);
-                            }
-                        }
-                        if row.kind == 1: ContainerRow {
-                            item: row;
-                            act(a) => {
-                                DockerPage.action(row.id, a);
-                            }
-                            select => {
-                                DockerPage.select(row.id);
-                            }
-                        }
-                    }
-                    AddServerForm { }
+            if DockerPage.configured: HorizontalLayout {
+                spacing: 6px;
+                alignment: start;
+                Text {
+                    text: "Sort";
+                    font-size: 12px * Theme.font-scale;
+                    color: Theme.faint;
+                    vertical-alignment: center;
                 }
+                for key[i] in root.sort-keys: SortChip {
+                    text: key;
+                    active: DockerPage.sort == i;
+                    desc: DockerPage.sort-desc;
+                    clicked => {
+                        DockerPage.set-sort(i);
+                    }
+                }
+            }
+        }
+        ScrollView {
+            VerticalLayout {
+                padding: 14px;
+                padding-top: 4px;
+                spacing: 8px;
+                alignment: start;
+                if !DockerPage.configured: Rectangle {
+                    height: 120px;
+                    border-radius: 10px * Theme.round;
+                    background: Theme.surface-2;
+                    border-width: 1px;
+                    border-color: Theme.border;
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 6px;
+                        Text {
+                            text: "Connect to a server running Docker";
+                            font-size: 15px * Theme.font-scale;
+                            font-weight: 600;
+                            color: Theme.text;
+                            horizontal-alignment: center;
+                        }
+                        Text {
+                            text: "Point Sophon at a docker-socket-proxy on your LAN. It lists containers live and can start, stop and restart them.";
+                            width: 520px;
+                            wrap: word-wrap;
+                            font-size: 12.5px * Theme.font-scale;
+                            color: Theme.dim;
+                            horizontal-alignment: center;
+                        }
+                    }
+                }
+                for row[i] in DockerPage.rows: Rectangle {
+                    height: row.kind == 0 ? 40px : row.kind == 1 ? 52px : detail.preferred-height;
+                    if row.kind == 0: ServerHeader {
+                        item: row;
+                        op(o) => {
+                            DockerPage.server-op(row.server, o);
+                        }
+                    }
+                    if row.kind == 1: ContainerRow {
+                        item: row;
+                        act(a) => {
+                            DockerPage.action(row.id, a);
+                        }
+                        toggle => {
+                            DockerPage.toggle(row.id);
+                        }
+                    }
+                    detail := DetailPanel {
+                        visible: row.kind == 2;
+                        item: row;
+                    }
+                }
+                AddServerForm { }
             }
         }
     }

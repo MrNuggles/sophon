@@ -1,37 +1,68 @@
 //! The Docker tab (feature "docker"): a background poller that lists containers
-//! on each configured server and lets you start / stop / restart them.
+//! on each configured server and lets you sort them, expand them for live
+//! CPU/RAM graphs and details, and start / stop / restart them.
 //!
 //! All network work runs on a dedicated thread; results are delivered to the UI
-//! thread via `invoke_from_event_loop`. Polling is fast (2 s) only while the tab
-//! is visible, slow (15 s) otherwise, so it costs almost nothing in the
-//! background — the same discipline as the local sampler.
+//! thread via `invoke_from_event_loop`. `list` is cheap and polled for every
+//! server; the costly per-container `stats`/`inspect` calls are made only for
+//! *expanded* containers (plus all running ones while sorting by CPU/RAM), so
+//! the background cost stays bounded — the same discipline as the local sampler.
 
 use std::cell::RefCell;
-use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
+use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering::Relaxed};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
 use slint::{Color, ComponentHandle, Model, ModelRc, VecModel};
-use sophon_docker::{Container, Server, ServerState};
+use sophon_core::history::Ring;
+use sophon_docker::{Container, Details, Server, ServerState, Stats};
 
-use crate::settings;
-use crate::{AppWindow, DockerPage, DockerRow};
+use crate::graph::{self, nice_max};
+use crate::{AppWindow, DockerKV, DockerPage, DockerRow, fmt, settings};
 
 const POLL_VISIBLE: Duration = Duration::from_secs(2);
 const POLL_HIDDEN: Duration = Duration::from_secs(15);
 
+/// Sort keys, matching the chips in docker.slint.
+pub const SORTS: [&str; 6] = ["Ports", "Name", "State", "Age", "CPU", "RAM"];
+
+/// Per-container CPU%/memory history for the expanded graphs (short: ~1 min).
+#[derive(Default)]
+struct Hist {
+    cpu: Ring<60>,
+    mem: Ring<60>,
+    limit: u64,
+}
+
 /// Shared with the poller thread.
 struct Net {
     servers: Mutex<Vec<Server>>,
+    /// Containers whose stats/inspect the poller should fetch (expanded rows).
+    expanded: Mutex<HashSet<String>>,
+    sort: AtomicU8,
     visible: AtomicBool,
     wake: mpsc::Sender<()>,
+}
+
+/// One poller delivery.
+struct Poll {
+    states: Vec<ServerState>,
+    stats: HashMap<String, Stats>,
+    details: HashMap<String, Details>,
 }
 
 struct DockerUi {
     app: slint::Weak<AppWindow>,
     net: Arc<Net>,
     states: Vec<ServerState>,
-    selected: String,
+    server_count: usize,
+    expanded: HashSet<String>,
+    sort: usize,
+    sort_desc: bool,
+    hist: HashMap<String, Hist>,
+    latest: HashMap<String, Stats>,
+    details: HashMap<String, Details>,
     rows: std::rc::Rc<VecModel<DockerRow>>,
 }
 
@@ -43,7 +74,6 @@ fn with<R>(f: impl FnOnce(&mut DockerUi) -> R) -> Option<R> {
     STATE.with_borrow_mut(|s| s.as_mut().map(f))
 }
 
-/// Reads the configured servers from settings.
 fn load_servers() -> Vec<Server> {
     settings::get(|s| s.docker_servers.clone())
         .iter()
@@ -53,13 +83,35 @@ fn load_servers() -> Vec<Server> {
 
 pub fn install(app: &AppWindow) {
     let (wake, rx) = mpsc::channel();
-    let net = Arc::new(Net { servers: Mutex::new(load_servers()), visible: AtomicBool::new(false), wake });
+    let servers = load_servers();
+    let (sort, sort_desc) = settings::get(|s| (s.docker_sort.min(SORTS.len() - 1), s.docker_sort_desc));
+    let net = Arc::new(Net {
+        servers: Mutex::new(servers.clone()),
+        expanded: Mutex::new(HashSet::new()),
+        sort: AtomicU8::new(sort as u8),
+        visible: AtomicBool::new(false),
+        wake,
+    });
     let rows = std::rc::Rc::new(VecModel::default());
-    app.global::<DockerPage>().set_rows(ModelRc::from(rows.clone()));
-
-    STATE.set(Some(DockerUi { app: app.as_weak(), net: net.clone(), states: Vec::new(), selected: String::new(), rows }));
-
     let g = app.global::<DockerPage>();
+    g.set_rows(ModelRc::from(rows.clone()));
+    g.set_sort(sort as i32);
+    g.set_sort_desc(sort_desc);
+
+    STATE.set(Some(DockerUi {
+        app: app.as_weak(),
+        net: net.clone(),
+        states: Vec::new(),
+        server_count: servers.len(),
+        expanded: HashSet::new(),
+        sort,
+        sort_desc,
+        hist: HashMap::new(),
+        latest: HashMap::new(),
+        details: HashMap::new(),
+        rows,
+    }));
+
     g.on_action(|id, op| {
         with(|d| d.container_action(&id, &op));
     });
@@ -69,25 +121,17 @@ pub fn install(app: &AppWindow) {
     g.on_add_server(|name, addr| {
         with(|d| d.add_server(&name, &addr));
     });
-    g.on_select(|id| {
-        with(|d| {
-            d.selected = id.to_string();
-            if let Some(app) = d.app.upgrade() {
-                app.global::<DockerPage>().set_selected_id(id);
-            }
-        });
+    g.on_toggle(|id| {
+        with(|d| d.toggle(&id));
+    });
+    g.on_set_sort(|key| {
+        with(|d| d.set_sort(key.max(0) as usize));
     });
 
-    // Poller thread.
-    let poll_net = net;
-    std::thread::Builder::new()
-        .name("docker".into())
-        .spawn(move || poller(poll_net, rx))
-        .ok();
+    std::thread::Builder::new().name("docker".into()).spawn(move || poller(net, rx)).ok();
     render();
 }
 
-/// Called when the Docker tab is shown or hidden (from the panel lifecycle).
 pub fn set_visible(visible: bool) {
     with(|d| {
         d.net.visible.store(visible, Relaxed);
@@ -97,10 +141,25 @@ pub fn set_visible(visible: bool) {
     });
 }
 
-/// The poller delivered fresh results.
-fn apply(states: Vec<ServerState>) {
+fn apply(poll: Poll) {
     with(|d| {
-        d.states = states;
+        d.states = poll.states;
+        // Latest stats (for sorting) and expanded history (for graphs).
+        for (id, s) in &poll.stats {
+            d.latest.insert(id.clone(), *s);
+            if d.expanded.contains(id) {
+                let h = d.hist.entry(id.clone()).or_default();
+                h.cpu.push(s.cpu_pct);
+                h.mem.push(s.mem_used as f32);
+                h.limit = s.mem_limit;
+            }
+        }
+        d.details.extend(poll.details);
+        // Forget containers that no longer exist.
+        let live: HashSet<&str> = d.states.iter().flat_map(|s| &s.containers).map(|c| c.id.as_str()).collect();
+        d.hist.retain(|id, _| live.contains(id.as_str()));
+        d.latest.retain(|id, _| live.contains(id.as_str()));
+        d.details.retain(|id, _| live.contains(id.as_str()));
         render_rows(d);
     });
 }
@@ -108,45 +167,56 @@ fn apply(states: Vec<ServerState>) {
 fn poller(net: Arc<Net>, wake: mpsc::Receiver<()>) {
     loop {
         let servers = net.servers.lock().unwrap().clone();
+        let visible = net.visible.load(Relaxed);
+        let expanded = if visible { net.expanded.lock().unwrap().clone() } else { HashSet::new() };
+        // Fetch all running containers' stats only to sort by usage, and only
+        // while the tab is visible — otherwise `list` alone keeps state fresh.
+        let sort_usage = visible && matches!(net.sort.load(Relaxed) as usize, 4 | 5);
+        let mut stats = HashMap::new();
+        let mut details = HashMap::new();
         let states: Vec<ServerState> = servers
             .iter()
             .map(|srv| match sophon_docker::list(srv) {
-                Ok(mut cs) => {
-                    cs.sort_by(|a, b| b.running().cmp(&a.running()).then_with(|| a.name.cmp(&b.name)));
+                Ok(cs) => {
+                    for c in &cs {
+                        if !c.running() {
+                            continue;
+                        }
+                        let want_stats = expanded.contains(&c.id) || sort_usage;
+                        if want_stats && let Ok(s) = sophon_docker::stats(srv, &c.id) {
+                            stats.insert(c.id.clone(), s);
+                        }
+                        if expanded.contains(&c.id) && let Ok(dt) = sophon_docker::inspect(srv, &c.id) {
+                            details.insert(c.id.clone(), dt);
+                        }
+                    }
                     ServerState { server: srv.clone(), error: None, containers: cs }
                 }
                 Err(e) => ServerState { server: srv.clone(), error: Some(e.to_string()), containers: Vec::new() },
             })
             .collect();
-        if slint::invoke_from_event_loop(move || apply(states)).is_err() {
+        if slint::invoke_from_event_loop(move || apply(Poll { states, stats, details })).is_err() {
             return;
         }
         let interval = if net.visible.load(Relaxed) { POLL_VISIBLE } else { POLL_HIDDEN };
-        // Sleep, but wake early on config/visibility changes.
         let deadline = Instant::now() + interval;
-        loop {
-            match wake.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
-                Ok(()) => break,
-                Err(mpsc::RecvTimeoutError::Timeout) => break,
-                Err(mpsc::RecvTimeoutError::Disconnected) => return,
-            }
+        match wake.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+            Ok(()) => {}
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => return,
         }
+        while wake.try_recv().is_ok() {}
     }
 }
 
 impl DockerUi {
+    fn find_server(&self, id: &str) -> Option<Server> {
+        self.states.iter().find(|s| s.containers.iter().any(|c| c.id == id)).map(|s| s.server.clone())
+    }
+
     fn container_action(&mut self, id: &str, op: &str) {
-        // Find which server owns this container.
-        let Some(server) = self.states.iter().find(|s| s.containers.iter().any(|c| c.id == id)).map(|s| s.server.clone()) else {
-            return;
-        };
-        let name = self
-            .states
-            .iter()
-            .flat_map(|s| &s.containers)
-            .find(|c| c.id == id)
-            .map(|c| c.name.clone())
-            .unwrap_or_default();
+        let Some(server) = self.find_server(id) else { return };
+        let name = self.states.iter().flat_map(|s| &s.containers).find(|c| c.id == id).map(|c| c.name.clone()).unwrap_or_default();
         let (id, op) = (id.to_string(), op.to_string());
         let net = self.net.clone();
         crate::ui::toast(format!("{}ing {name}…", op_verb(&op)));
@@ -157,9 +227,40 @@ impl DockerUi {
             };
             let _ = slint::invoke_from_event_loop(move || {
                 crate::ui::toast(msg);
-                let _ = net.wake.send(()); // refresh soon
+                let _ = net.wake.send(());
             });
         });
+    }
+
+    fn toggle(&mut self, id: &str) {
+        if !self.expanded.remove(id) {
+            self.expanded.insert(id.to_string());
+        }
+        *self.net.expanded.lock().unwrap() = self.expanded.clone();
+        let _ = self.net.wake.send(()); // fetch its stats/details promptly
+        render_rows(self);
+    }
+
+    fn set_sort(&mut self, key: usize) {
+        if key == self.sort {
+            self.sort_desc = !self.sort_desc;
+        } else {
+            self.sort = key;
+            // Ports/Name/Age default ascending; State/CPU/RAM default descending.
+            self.sort_desc = matches!(key, 2 | 4 | 5);
+        }
+        self.net.sort.store(self.sort as u8, Relaxed);
+        settings::update(|s| {
+            s.docker_sort = self.sort;
+            s.docker_sort_desc = self.sort_desc;
+        });
+        let _ = self.net.wake.send(());
+        if let Some(app) = self.app.upgrade() {
+            let g = app.global::<DockerPage>();
+            g.set_sort(self.sort as i32);
+            g.set_sort_desc(self.sort_desc);
+        }
+        render_rows(self);
     }
 
     fn server_op(&mut self, idx: usize, op: &str) {
@@ -180,16 +281,18 @@ impl DockerUi {
     }
 
     fn add_server(&mut self, name: &str, addr: &str) {
-        let name = if name.trim().is_empty() { addr.trim().to_string() } else { name.trim().to_string() };
-        if Server::parse(&name, addr).is_none() {
+        if Server::parse(name, addr).is_none() {
             return crate::ui::toast("Enter an address like 10.0.0.5:2375");
         }
+        let name = if name.trim().is_empty() { addr.trim().to_string() } else { name.trim().to_string() };
         settings::update(|s| s.docker_servers.push((name, addr.trim().to_string())));
         self.reload_servers();
     }
 
     fn reload_servers(&mut self) {
-        *self.net.servers.lock().unwrap() = load_servers();
+        let servers = load_servers();
+        self.server_count = servers.len();
+        *self.net.servers.lock().unwrap() = servers;
         let _ = self.net.wake.send(());
         render_rows(self);
     }
@@ -220,34 +323,60 @@ fn render_rows(d: &mut DockerUi) {
             server_error: st.error.is_some(),
             ..Default::default()
         });
-        for c in &st.containers {
+        let mut cs: Vec<&Container> = st.containers.iter().collect();
+        self_sort(&mut cs, d.sort, d.sort_desc, &d.latest);
+        for c in cs {
             total += 1;
             if c.running() {
                 running += 1;
             }
-            rows.push(container_row(c, i, &d.selected));
+            let open = d.expanded.contains(&c.id);
+            rows.push(container_row(c, i, open));
+            if open {
+                rows.push(detail_row(c, i, d));
+            }
         }
     }
-    let count = d.states.len();
     update_model(&d.rows, rows);
-    g.set_configured(count > 0);
+
+    // Configured/summary reflect whether SERVERS are set up, not whether a poll
+    // has landed yet — so it never says "No servers yet" while connected.
+    let configured = d.server_count > 0;
+    g.set_configured(configured);
     g.set_summary(
-        if count == 0 {
+        if !configured {
             "No servers yet".into()
+        } else if d.states.is_empty() {
+            format!("Connecting to {} server{}…", d.server_count, plural(d.server_count))
         } else {
-            format!("{running} of {total} containers running across {count} server{}", if count == 1 { "" } else { "s" })
+            format!("{running} of {total} containers running across {} server{}", d.states.len(), plural(d.states.len()))
         }
         .into(),
     );
 }
 
-fn container_row(c: &Container, server: usize, selected: &str) -> DockerRow {
-    let ports = c
-        .ports
-        .iter()
-        .map(|p| format!("{}→{}/{}", p.public, p.private, p.proto))
-        .collect::<Vec<_>>()
-        .join("  ");
+/// Sorts a server's containers by the chosen key.
+fn self_sort(cs: &mut [&Container], sort: usize, desc: bool, latest: &HashMap<String, Stats>) {
+    use std::cmp::Ordering;
+    let cpu = |c: &Container| latest.get(&c.id).map_or(0.0, |s| s.cpu_pct);
+    let mem = |c: &Container| latest.get(&c.id).map_or(0, |s| s.mem_used);
+    cs.sort_by(|a, b| {
+        let o = match sort {
+            0 => a.lowest_port().cmp(&b.lowest_port()),
+            1 => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+            2 => b.running().cmp(&a.running()).then(a.state.cmp(&b.state)),
+            3 => a.created.cmp(&b.created),
+            4 => cpu(a).total_cmp(&cpu(b)),
+            _ => mem(a).cmp(&mem(b)),
+        };
+        let o = if desc { o.reverse() } else { o };
+        // Stable tiebreak by name so the list doesn't jitter.
+        o.then_with(|| a.name.cmp(&b.name)).then(a.id.cmp(&b.id) as Ordering)
+    });
+}
+
+fn container_row(c: &Container, server: usize, expanded: bool) -> DockerRow {
+    let ports = c.ports.iter().map(|p| format!("{}→{}/{}", p.public, p.private, p.proto)).collect::<Vec<_>>().join("  ");
     DockerRow {
         kind: 1,
         server: server as i32,
@@ -259,13 +388,71 @@ fn container_row(c: &Container, server: usize, selected: &str) -> DockerRow {
         status: c.status.as_str().into(),
         ports: ports.into(),
         running: c.running(),
-        selected: c.id == selected,
+        expanded,
+        ..Default::default()
+    }
+}
+
+fn detail_row(c: &Container, server: usize, d: &DockerUi) -> DockerRow {
+    let stat = d.latest.get(&c.id).copied().unwrap_or_default();
+    let hist = d.hist.get(&c.id);
+    let cpu_peak = hist.map_or(0.0, |h| h.cpu.max());
+    let mem_peak = hist.map_or(0.0, |h| h.mem.max());
+    let mem_limit = hist.map(|h| h.limit).filter(|&l| l > 0).unwrap_or(stat.mem_limit);
+    let cpu_series = hist.map(|h| graph::ring(&h.cpu, nice_max(cpu_peak, 100.0))).unwrap_or_default();
+    let mem_series = hist.map(|h| graph::ring(&h.mem, nice_max(mem_peak, 1.0))).unwrap_or_default();
+
+    let mut facts: Vec<DockerKV> = Vec::new();
+    let mut kv = |label: &str, value: String| {
+        if !value.is_empty() {
+            facts.push(DockerKV { label: label.into(), value: value.into() });
+        }
+    };
+    let det = d.details.get(&c.id);
+    kv("Image", c.image.clone());
+    kv("Container ID", c.id.chars().take(12).collect());
+    if let Some(det) = det {
+        kv("Command", det.command.clone());
+        kv("Restart policy", det.restart_policy.clone());
+        if !det.health.is_empty() {
+            kv("Health", det.health.clone());
+        }
+        for (net, ip) in &det.networks {
+            kv("Network", format!("{net}   {ip}"));
+        }
+        for (src, dst, rw) in det.mounts.iter().take(6) {
+            kv("Mount", format!("{src}  →  {dst}{}", if *rw { "" } else { "  (ro)" }));
+        }
+        if det.env_count > 0 {
+            kv("Environment", format!("{} variables", det.env_count));
+        }
+    } else if c.running() {
+        kv("Details", "loading…".into());
+    }
+    let all_ports = c.ports.iter().map(|p| format!("{}→{}/{}", p.public, p.private, p.proto)).collect::<Vec<_>>().join("    ");
+    kv("Published ports", if all_ports.is_empty() { "none".into() } else { all_ports });
+
+    DockerRow {
+        kind: 2,
+        server: server as i32,
+        id: c.id.as_str().into(),
+        cpu_series,
+        cpu_text: format!("{:.1}%", stat.cpu_pct).into(),
+        mem_series,
+        mem_text: if mem_limit > 0 {
+            format!("{} / {}", fmt::bytes_short(stat.mem_used), fmt::bytes_short(mem_limit))
+        } else {
+            fmt::bytes_short(stat.mem_used).into()
+        }
+        .into(),
+        facts: ModelRc::new(VecModel::from(facts)),
+        running: c.running(),
         ..Default::default()
     }
 }
 
 fn state_color(state: &str) -> Color {
-    let hex = match state {
+    let hex: u32 = match state {
         "running" => 0x2fd39a,
         "paused" => 0xffb13d,
         "restarting" => 0x3db4ff,
@@ -290,6 +477,10 @@ fn op_done(op: &str) -> &str {
         "stop" => "stopped",
         _ => "restarted",
     }
+}
+
+fn plural(n: usize) -> &'static str {
+    if n == 1 { "" } else { "s" }
 }
 
 fn update_model<T: Clone + PartialEq + 'static>(m: &VecModel<T>, new: Vec<T>) {

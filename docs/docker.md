@@ -56,7 +56,21 @@ seconds and polls live while the tab is open.
   `VOLUMES` etc. at `0` means even a compromised Sophon can't run commands in
   containers, build images, or touch volumes through the proxy.
 
+## Using the tab
+
+- **Sort** by Ports (default), Name, State, Age, CPU or RAM — click a chip to
+  sort, click again to reverse. Sorting by **Ports** lists containers by their
+  lowest published host port, so you can scan for a free port at a glance.
+- **Click a container** to expand it: live CPU and memory graphs, plus its
+  image, id, command, restart policy, health, network IP, mounts, env count and
+  all published ports. Several can be open at once; click again to close.
+- CPU/memory graphs and details are only fetched while the tab is open and a row
+  is expanded (or, for CPU/RAM sorting, for running containers) — so idle cost
+  stays near zero.
+
 ## What Sophon uses
 
-Only three Engine API endpoints, all through the proxy:
-`GET /containers/json?all=1`, and `POST /containers/{id}/{start,stop,restart}`.
+Read: `GET /containers/json?all=1`, and — for the expanded view —
+`GET /containers/{id}/stats?stream=false` and `GET /containers/{id}/json`.
+Control: `POST /containers/{id}/{start,stop,restart}`. All are covered by the
+proxy allowlist `CONTAINERS=1 POST=1`; nothing else is needed or used.
