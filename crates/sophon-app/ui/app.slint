@@ -53,6 +53,10 @@ export component AppWindow inherits Window {
     in property <[string]> tab-labels;
     in property <[string]> tab-ids;
     property <string> current-id: (root.tab >= 0 && root.tab < root.tab-ids.length) ? root.tab-ids[root.tab] : "processes";
+    // Settings is not a tab: it's an overlay opened from the ☰ button in the
+    // header (beside the theme toggle) and closed with Escape, a tab click,
+    // or the button again.
+    in-out property <bool> settings-open: false;
     // Processes
     in property <[ProcRow]> rows;
     in property <Totals> totals;
@@ -106,9 +110,15 @@ export component AppWindow inherits Window {
                 return accept;
             }
             if (event.modifiers.control && (event.text == "f" || event.text == "F")) {
+                root.settings-open = false;
                 root.tab = 0;
                 root.tab-changed(0);
                 search.focus-input();
+                return accept;
+            }
+            if (event.text == Key.Escape && root.settings-open) {
+                root.settings-open = false;
+                keys.focus();
                 return accept;
             }
             if (event.text == Key.Escape && root.confirm-text != "") {
@@ -138,6 +148,7 @@ export component AppWindow inherits Window {
                 return accept;
             }
             if (event.modifiers.control && event.text == Key.Tab) {
+                root.settings-open = false;
                 root.tab = Math.mod(root.tab + 1, root.tab-ids.length);
                 root.tab-changed(root.tab);
                 return accept;
@@ -179,6 +190,7 @@ export component AppWindow inherits Window {
                             labels: root.tab-labels;
                             current <=> root.tab;
                             changed(i) => {
+                                root.settings-open = false;
                                 root.tab-changed(i);
                             }
                         }
@@ -189,9 +201,20 @@ export component AppWindow inherits Window {
                     VerticalLayout {
                         alignment: center;
                         search := SearchBox {
-                            opacity: root.current-id == "processes" ? 1 : 0;
+                            opacity: !root.settings-open && root.current-id == "processes" ? 1 : 0;
                             edited(text) => {
                                 root.filter-changed(text);
+                            }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        IconButton {
+                            // Three lines: settings (outside the tab bar).
+                            icon: "M 4 6 L 20 6 M 4 12 L 20 12 M 4 18 L 20 18";
+                            active: root.settings-open;
+                            clicked => {
+                                root.settings-open = !root.settings-open;
                             }
                         }
                     }
@@ -210,7 +233,7 @@ export component AppWindow inherits Window {
                 }
             }
 
-            if root.current-id == "processes": ProcessesView {
+            if !root.settings-open && root.current-id == "processes": ProcessesView {
                 vertical-stretch: 1;
                 rows: root.rows;
                 totals: root.totals;
@@ -263,13 +286,13 @@ export component AppWindow inherits Window {
                     keys.focus();
                 }
             }
-            if root.current-id == "settings": SettingsView {
+            if root.settings-open: SettingsView {
                 vertical-stretch: 1;
             }
-            if root.current-id == "docker": DockerView {
+            if !root.settings-open && root.current-id == "docker": DockerView {
                 vertical-stretch: 1;
             }
-            if root.current-id == "performance": PerformanceView {
+            if !root.settings-open && root.current-id == "performance": PerformanceView {
                 vertical-stretch: 1;
                 tiles: root.tiles;
                 current <=> root.tile;

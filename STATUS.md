@@ -22,10 +22,9 @@ security model, [SECURITY.md](SECURITY.md).
 ## Build & run
 
 ```bash
-# The core app (no network code):
 cargo build --release && ./target/release/sophon
-# With the optional Docker tab:
-cargo build --release --features docker && ./target/release/sophon
+# Without any network code (no Docker tab at all):
+cargo build --release --no-default-features && ./target/release/sophon
 # Add Sophon to the app launcher (name + icon in the taskbar):
 ./target/release/sophon --install
 ```
@@ -50,10 +49,13 @@ cargo build --release --features docker && ./target/release/sophon
   zoom, breadcrumbs, hover, hold-for-path, right-click → open / Trash; colour by
   folder / file type / age; remembered scans.
 
-**Settings** — live preview, search, per-setting reset; plain-text config.
-Seven categories (General, Appearance, Resource use, Processes, Performance,
-Space map, Tray), plus **Tabs** in builds with optional tabs — turn a tab like
-Docker on or off without a restart; a hidden tab fetches nothing at all.
+**Settings** — lives outside the tab bar: a ☰ button beside the theme toggle
+opens it as an overlay (Escape or a tab click closes it). Live preview, search,
+per-setting reset; plain-text config. Eight categories (General, Appearance,
+Resource use, Processes, Performance, Space map, Tray, **Tabs**) — Tabs turns
+the optional tabs on or off without a restart (Performance on by default,
+Docker off); a hidden tab fetches nothing at all. Processes is the permanent
+dashboard tab.
 
 **Tray & window** — close sends Sophon to the tray (Steam-style, no taskbar
 entry); tray hover shows a live summary; Ctrl+Q / tray menu quits.
@@ -62,7 +64,7 @@ entry); tray hover shows a live summary; Ctrl+Q / tray menu quits.
 (Sophon never runs as root); enables ending any process and per-app UDP network
 via a kernel eBPF counter.
 
-**Docker tab (optional, `--features docker`)** — connect to Docker on LAN
+**Docker tab (optional, off by default)** — connect to Docker on LAN
 servers via a socket proxy; list containers (running + stopped) with ports and
 server; **collapsible server headers**; sort by Ports / Name / State / Age /
 CPU / RAM; **expand a container** for live CPU/memory graphs and full details;
@@ -80,6 +82,8 @@ in-tab; hide the whole tab from Settings → Tabs (its poller then parks).
   (read-only — snapshot mode never accepts the dialog; the mock's request log
   showed no control requests). Toggling the tab off and on from Settings → Tabs
   was verified live (tab bar rebuilds, data re-fetches; screenshot pair).
+  The dashboard layout (Processes permanent, ☰ settings button, Tabs defaults)
+  is likewise snapshot-verified from a fresh config.
 - **Verified by you:** the Docker tab against both of your real servers
   (2026-09-19).
 - **Needs your hands (couldn't test from here):**
@@ -107,6 +111,10 @@ in-tab; hide the whole tab from Settings → Tabs (its poller then parks).
     Docker client, expandable rows with graphs, sorting; then collapsible
     server headers, stop confirmation, and a mock Docker API for offline
     testing (`sophon-docker --example mock`).
+11. **Dashboard layout** — Processes is the permanent dashboard tab;
+    Performance and Docker are toggles in Settings → Tabs (on/off by default
+    respectively); Settings moved out of the tab bar to a ☰ header button;
+    Docker became a default Cargo feature.
 
 ## Open decisions / next steps
 

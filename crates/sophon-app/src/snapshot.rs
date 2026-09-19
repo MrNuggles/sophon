@@ -46,7 +46,11 @@ enum Step {
     /// opens the inline edit needs a live mouse).
     #[cfg(feature = "docker")]
     DockerRenameServer(&'static str),
-    Tab(i32),
+    /// Opens or closes the Settings overlay (it lives outside the tab bar).
+    SettingsOpen(bool),
+    /// Switches to the tab with this panel id, resolved at run time (tab
+    /// positions shift as optional tabs are toggled).
+    TabId(&'static str),
     Tile(i32),
     Mode(i32),
     Quit,
@@ -63,7 +67,7 @@ pub fn start(app: &AppWindow, dir: PathBuf) {
     steps.extend([Step::ToggleRow(1), Step::Wait, Step::SelectRow(2), Step::Wait, Step::Wait, Step::Shot("processes-child")]);
     // Collapse the Apps section.
     steps.extend([Step::SelectRow(0), Step::Wait, Step::Shot("processes-collapsed"), Step::SelectRow(0)]);
-    steps.push(Step::Tab(1));
+    steps.push(Step::TabId("performance"));
     // Rewind: simulated hover (crosshair on every graph + tooltip), then a drag-zoom.
     steps.extend([Step::Tile(0), Step::Wait, Step::HoverAt("cpu", 0.97), Step::Wait, Step::Shot("rewind-hover")]);
     steps.extend([Step::HoverAt("", -1.0), Step::Zoom(0.6, 0.95), Step::Wait, Step::Shot("rewind-zoom"), Step::ResetView]);
@@ -81,65 +85,47 @@ pub fn start(app: &AppWindow, dir: PathBuf) {
     steps.extend([Step::SpaceSelect(40, false), Step::SpaceSelect(60, true), Step::SpaceSelect(80, true), Step::Wait, Step::Shot("space-selected")]);
     steps.extend([Step::SpaceAskTrash, Step::Wait, Step::Shot("space-confirm"), Step::SpaceCancelTrash, Step::SpaceSelect(-1, false)]);
     steps.extend([Step::Mode(1), Step::Wait, Step::Shot("space-light")]);
-    // Docker tab (feature builds): rows from whatever servers are configured,
-    // then the stop confirmation — opened and cancelled, never accepted.
+    // Docker (feature builds): it ships disabled, so enable it from
+    // Settings → Tabs first, then shoot the tab — rows, the stop confirmation
+    // (opened and cancelled, never accepted), a collapsed header, a rename.
     #[cfg(feature = "docker")]
     {
-        let docker_tab = crate::panels::panels().iter().position(|p| p.id == "docker").unwrap_or(0) as i32;
-        steps.extend([Step::Tab(docker_tab)]);
+        steps.extend([Step::SettingsOpen(true), Step::SetToggle("tabs_docker", true)]);
+        steps.extend(std::iter::repeat_with(|| Step::Wait).take(5));
+        steps.extend([Step::TabId("docker")]);
         steps.extend(std::iter::repeat_with(|| Step::Wait).take(6));
         steps.push(Step::Shot("docker"));
         steps.extend([Step::DockerAskStop, Step::Wait, Step::Shot("docker-confirm"), Step::DockerCancelStop]);
         // A collapsed server header hides that server's containers.
         steps.extend([Step::DockerToggleServer, Step::Wait, Step::Shot("docker-collapsed"), Step::DockerToggleServer]);
+        // Rename the first server (persisted to the config, shown at once), then put it back.
+        steps.extend([Step::DockerRenameServer("Tiny renamed"), Step::Wait, Step::Shot("docker-renamed"), Step::DockerRenameServer("Tiny")]);
+        // Off again from Settings: the tab disappears live.
+        steps.extend([
+            Step::SettingsOpen(true),
+            Step::SetToggle("tabs_docker", false),
+            Step::Wait,
+            Step::TabId("processes"),
+            Step::Wait,
+            Step::Shot("live-docker-off"),
+            Step::SettingsOpen(false),
+        ]);
     }
-    // Settings: every category. The tab number depends on which panels exist.
-    let settings_tab = crate::panels::panels().iter().position(|p| p.id == "settings").unwrap_or(2) as i32;
-    steps.push(Step::Tab(settings_tab));
+    // Settings: every category. Settings is an overlay now — opened from the
+    // header's ☰ button, not the tab bar.
+    steps.push(Step::SettingsOpen(true));
     // Change a few settings, then show the Processes tab to prove they apply live.
     steps.extend([Step::SetChoice("density", 1), Step::SetChoice("graph_style", 3), Step::SetSlide("roundness", 0.2), Step::SetToggle("show_kernel", true)]);
-    steps.extend([Step::Tab(0), Step::Wait, Step::Shot("live-compact-bars"), Step::Tab(settings_tab)]);
+    steps.extend([Step::TabId("processes"), Step::Wait, Step::Shot("live-compact-bars"), Step::SettingsOpen(true)]);
     // Reset them.
     steps.extend([Step::SetChoice("density", 0), Step::SetChoice("graph_style", 0), Step::SetSlide("roundness", 1.0), Step::SetToggle("show_kernel", false)]);
-    // "Tabs" is an extra category in builds with optional tabs.
-    #[cfg(not(feature = "docker"))]
-    let setting_shots = ["settings-0", "settings-1", "settings-2", "settings-3", "settings-4", "settings-5", "settings-6"];
-    #[cfg(feature = "docker")]
     let setting_shots = ["settings-0", "settings-1", "settings-2", "settings-3", "settings-4", "settings-5", "settings-6", "settings-7-tabs"];
     for (i, name) in setting_shots.iter().enumerate() {
         steps.extend([Step::SettingsCategory(i as i32), Step::Wait, Step::Shot(name)]);
     }
-    // Tabs are toggled live from Settings: the Docker tab appears and disappears
-    // without a restart.
-    #[cfg(feature = "docker")]
-    {
-        let docker_tab = crate::panels::panels().iter().position(|p| p.id == "docker").unwrap_or(0) as i32;
-        steps.extend([
-            Step::SetToggle("tabs_docker", false),
-            Step::Wait,
-            Step::Tab(0),
-            Step::Wait,
-            Step::Shot("live-docker-off"),
-            Step::SetToggle("tabs_docker", true),
-            Step::Wait,
-            Step::Wait,
-            Step::Wait,
-            Step::Wait,
-            Step::Wait,
-            Step::Tab(docker_tab),
-            Step::Wait,
-            Step::Shot("live-docker-on"),
-            // Rename the first server (persisted to the config, shown at once),
-            // then put it back.
-            Step::DockerRenameServer("Tiny renamed"),
-            Step::Wait,
-            Step::Shot("docker-renamed"),
-            Step::DockerRenameServer("Tiny"),
-            Step::Tab(settings_tab),
-        ]);
-    }
-    steps.extend([Step::Mode(1), Step::Tile(0), Step::Wait, Step::Wait, Step::Shot("light-perf")]);
-    steps.extend([Step::Tab(0), Step::Wait, Step::Wait, Step::Shot("light-processes"), Step::Quit]);
+    steps.extend([Step::SettingsOpen(false)]);
+    steps.extend([Step::TabId("performance"), Step::Wait, Step::Mode(1), Step::Tile(0), Step::Wait, Step::Wait, Step::Shot("light-perf")]);
+    steps.extend([Step::TabId("processes"), Step::Wait, Step::Wait, Step::Shot("light-processes"), Step::Quit]);
 
     let weak = app.as_weak();
     let mut steps = steps.into_iter();
@@ -212,7 +198,10 @@ pub fn start(app: &AppWindow, dir: PathBuf) {
             Some(Step::DockerToggleServer) => app.global::<crate::DockerPage>().invoke_toggle_server(0),
             #[cfg(feature = "docker")]
             Some(Step::DockerRenameServer(name)) => app.global::<crate::DockerPage>().invoke_rename_server(0, name.into()),
-            Some(Step::Tab(t)) => {
+            Some(Step::SettingsOpen(open)) => app.set_settings_open(open),
+            Some(Step::TabId(id)) => {
+                let t = crate::panels::panels().iter().position(|p| p.id == id).unwrap_or(0) as i32;
+                app.set_settings_open(false);
                 app.set_tab(t);
                 app.invoke_tab_changed(t);
             }

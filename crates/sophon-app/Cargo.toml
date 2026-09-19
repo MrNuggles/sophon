@@ -17,7 +17,10 @@ slint = { version = "1.18", default-features = false, features = ["std", "compat
 fontique = { version = "0.11", default-features = false, features = ["system", "fontconfig-dlopen"] }
 
 [features]
-# Optional feature tabs. Off by default: a plain build has no network code.
+# Optional feature tabs. "docker" is on by default (the tab itself still ships
+# disabled — enable it in Settings → Tabs). `--no-default-features` builds
+# without any network code at all.
+default = ["docker"]
 docker = ["dep:sophon-docker"]
 
 [build-dependencies]

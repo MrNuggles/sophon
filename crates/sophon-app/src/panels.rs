@@ -6,9 +6,11 @@
 //!   2. install its controller in `main.rs` (one `#[cfg]`'d call);
 //!   3. add one `if root.current-id == "<id>": <View> {}` line in `app.slint`.
 //!
-//! Panels "processes" and "performance" are always indices 0 and 1 (the local
-//! sampler drives them); optional panels and "settings" follow. Nothing else in
-//! the app hard-codes a tab number — the current panel is resolved by `id`.
+//! "processes" is the app's dashboard and is permanent. Every other tab is
+//! optional: compiled in with its Cargo feature (docker) and shown or hidden
+//! live from Settings → Tabs. Settings itself is not a tab — it opens from
+//! the ☰ button beside the theme toggle. Nothing else in the app hard-codes
+//! a tab number — the current panel is resolved by `id`.
 
 /// A tab in the header. `id` matches the `if root.current-id == "<id>"` block
 /// in app.slint and is stable across builds (used for settings, etc.).
@@ -17,20 +19,17 @@ pub struct Panel {
     pub title: &'static str,
 }
 
-/// The enabled panels, in display order. Optional panels are compiled in only
-/// when their Cargo feature is on, so a build without them has no trace of them.
+/// The enabled content tabs, in display order. Optional tabs are compiled in
+/// only when their Cargo feature is on, and appear only when enabled.
 pub fn panels() -> Vec<Panel> {
-    let mut v = vec![
-        Panel { id: "processes", title: "Processes" },
-        Panel { id: "performance", title: "Performance" },
-    ];
-    // Compiled in with the Cargo feature, then shown or hidden from
-    // Settings → Tabs (nothing is fetched while it's hidden).
+    let mut v = vec![Panel { id: "processes", title: "Processes" }];
+    if crate::settings::get(|s| s.tabs_performance) {
+        v.push(Panel { id: "performance", title: "Performance" });
+    }
     #[cfg(feature = "docker")]
     if crate::settings::get(|s| s.tabs_docker) {
         v.push(Panel { id: "docker", title: "Docker" });
     }
-    v.push(Panel { id: "settings", title: "Settings" });
     v
 }
 

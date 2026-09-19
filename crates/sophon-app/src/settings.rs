@@ -128,8 +128,10 @@ pub struct Settings {
     pub docker_servers: Vec<(String, String)>,
     pub docker_sort: usize,
     pub docker_sort_desc: bool,
-    // Optional tabs (Settings → Tabs). A tab must also be compiled in
-    // (--features docker) before it can be toggled here.
+    // Optional tabs (Settings → Tabs). "processes" is permanent (the app's
+    // dashboard). A tab must also be compiled in (--features docker) before
+    // its toggle appears.
+    pub tabs_performance: bool,
     pub tabs_docker: bool,
 }
 
@@ -207,7 +209,8 @@ impl Default for Settings {
             docker_servers: Vec::new(),
             docker_sort: 0,
             docker_sort_desc: false,
-            tabs_docker: true,
+            tabs_performance: true,
+            tabs_docker: false,
         }
     }
 }
@@ -353,6 +356,7 @@ impl Settings {
                 }
                 "docker.sort" => self.docker_sort = n(),
                 "docker.sort_desc" => self.docker_sort_desc = b(),
+                "tabs.performance" => self.tabs_performance = b(),
                 "tabs.docker" => self.tabs_docker = b(),
                 _ => {}
             }
@@ -453,6 +457,7 @@ impl Settings {
         }
         kv("docker.sort", self.docker_sort.to_string());
         kv("docker.sort_desc", self.docker_sort_desc.to_string());
+        kv("tabs.performance", self.tabs_performance.to_string());
         kv("tabs.docker", self.tabs_docker.to_string());
         o
     }

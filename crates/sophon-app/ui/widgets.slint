@@ -253,14 +253,15 @@ export component Icon inherits Path {
 
 export component IconButton inherits Rectangle {
     in property <string> icon;
+    in property <bool> active: false;
     callback clicked;
     width: 34px;
     height: 34px;
     border-radius: 9px * Theme.round;
-    background: ta.pressed ? Theme.selected : ta.has-hover ? Theme.hover : transparent;
+    background: ta.pressed ? Theme.selected : ta.has-hover ? Theme.hover : root.active ? Theme.accent.with-alpha(0.16) : transparent;
     Icon {
         icon: root.icon;
-        color: ta.has-hover ? Theme.text : Theme.dim;
+        color: root.active ? Theme.accent : ta.has-hover ? Theme.text : Theme.dim;
     }
     ta := TouchArea {
         mouse-cursor: pointer;

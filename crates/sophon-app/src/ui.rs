@@ -110,6 +110,9 @@ struct Ui {
     frame_pending: Option<Instant>,
     tray: Option<slint::Weak<Tray>>,
     show_own: bool,
+    /// The Settings overlay (opened from the header ☰) is showing; nothing
+    /// under it is rendered or sampled at full rate.
+    settings_open: bool,
     /// Frames presented since the last stall check (debug output).
     frames: u32,
     /// Window size when it was closed to the tray.
@@ -156,6 +159,7 @@ pub fn install(app: &AppWindow, shared: Arc<Shared>) {
         tray: None,
         frames: 0,
         show_own: true,
+        settings_open: false,
         tray_size: None,
         tray_text: String::new(),
         debug: std::env::var_os("SOPHON_DEBUG").map(|_| (0, 0, sophon_core::sys::thread_cpu_us())),
@@ -363,8 +367,28 @@ pub fn cancel_confirm() {
 }
 
 /// Called with each new snapshot from the sampler thread (via the event loop).
+/// Keeps sampling decisions in step with the Settings overlay: while it's
+/// open nothing under it is rendered, and the process table isn't sampled at
+/// full rate (the Docker poller likewise drops to its hidden cadence).
+fn sync_settings_open(ui: &mut Ui) {
+    let Some(app) = ui.app.upgrade() else { return };
+    let open = app.get_settings_open();
+    if open == ui.settings_open {
+        return;
+    }
+    ui.settings_open = open;
+    let id = if open { "settings" } else { crate::panels::id_at(app.get_tab()) };
+    ui.shared.processes_visible.store(id == "processes", Relaxed);
+    #[cfg(feature = "docker")]
+    crate::docker_panel::set_visible(id == "docker");
+    if !open && id == "processes" {
+        let _ = ui.shared.wake.send(());
+    }
+}
+
 pub fn apply(snap: Snapshot) {
     with(|ui| {
+        sync_settings_open(ui);
         let t0 = sophon_core::sys::thread_cpu_us();
         ui.snap = snap;
         ui.snap_wall = SystemTime::now();
@@ -459,6 +483,9 @@ impl Ui {
     fn render(&mut self) {
         let Some(app) = self.app.upgrade() else { return };
         self.render_status(&app);
+        if app.get_settings_open() {
+            return; // the overlay owns the view; nothing under it changes
+        }
         match crate::panels::id_at(app.get_tab()) {
             "processes" => self.render_processes(),
             "performance" => self.render_perf(),
@@ -467,6 +494,7 @@ impl Ui {
     }
 
     fn tab_changed(&mut self, tab: i32) {
+        self.settings_open = false; // a tab click always closes the overlay
         self.shared.tab.store(tab as u8, Relaxed);
         let id = crate::panels::id_at(tab);
         self.shared.processes_visible.store(id == "processes", Relaxed);

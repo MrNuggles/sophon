@@ -10,14 +10,10 @@ use crate::graph::rgb;
 use crate::settings::{self, COLUMNS, SWATCHES, Settings, TRAY_SECS, UPDATE_MS};
 use crate::{AppWindow, SettingItem, SettingsPage, Shared, Theme};
 
-/// Settings categories, in display order. "Tabs" (the optional tabs) exists
-/// only in builds that have some — feature "docker" today.
+/// Settings categories, in display order. "Tabs" turns the optional tabs on
+/// or off ("processes" is permanent — the app's dashboard).
 pub fn categories() -> Vec<&'static str> {
-    let mut v =
-        vec!["General", "Appearance", "Resource use", "Processes tab", "Performance tab", "Space map", "Tray"];
-    #[cfg(feature = "docker")]
-    v.push("Tabs");
-    v
+    vec!["General", "Appearance", "Resource use", "Processes tab", "Performance tab", "Space map", "Tray", "Tabs"]
 }
 
 struct Page {
@@ -500,19 +496,25 @@ fn build(s: &Settings, p: &Page) -> Vec<SettingItem> {
     v.push(toggle(c, "tip_temps", "Temperatures", "CPU and GPU temperatures.", s.tip_temps, d.tip_temps));
     v.push(toggle(c, "tip_net", "Network", "Download and upload rates.", s.tip_net, d.tip_net));
 
+    let c = "Tabs";
+    v.push(heading(c, "OPTIONAL TABS"));
+    v.push(toggle(
+        c,
+        "tabs_performance",
+        "Performance",
+        "CPU, memory, GPU, disk and network graphs, with Rewind history and the space map. Processes always stays — it's the app's dashboard.",
+        s.tabs_performance,
+        d.tabs_performance,
+    ));
     #[cfg(feature = "docker")]
-    {
-        let c = "Tabs";
-        v.push(heading(c, "OPTIONAL TABS"));
-        v.push(toggle(
-            c,
-            "tabs_docker",
-            "Docker",
-            "Show the Docker tab: containers on your LAN servers, with live graphs and start / stop / restart. It must also be compiled in (--features docker); while hidden here, nothing at all is fetched.",
-            s.tabs_docker,
-            d.tabs_docker,
-        ));
-    }
+    v.push(toggle(
+        c,
+        "tabs_docker",
+        "Docker",
+        "Show the Docker tab: containers on your LAN servers, with live graphs and start / stop / restart. Off by default; while hidden here, nothing at all is fetched. (Builds with --no-default-features leave Docker out entirely.)",
+        s.tabs_docker,
+        d.tabs_docker,
+    ));
     v
 }
 
@@ -523,6 +525,7 @@ fn set_bool(s: &mut Settings, id: &str, v: bool) {
         "autostart" => s.autostart = v,
         "start_in_tray" => s.start_in_tray = v,
         "admin_on_start" => s.admin_on_start = v,
+        "tabs_performance" => s.tabs_performance = v,
         "tabs_docker" => s.tabs_docker = v,
         "accent_follow" => s.accent_follow = v,
         "graph_grid" => s.graph_grid = v,
@@ -643,6 +646,7 @@ fn get_bool(s: &Settings, id: &str) -> Option<bool> {
         "autostart" => s.autostart,
         "start_in_tray" => s.start_in_tray,
         "admin_on_start" => s.admin_on_start,
+        "tabs_performance" => s.tabs_performance,
         "tabs_docker" => s.tabs_docker,
         "accent_follow" => s.accent_follow,
         "graph_grid" => s.graph_grid,
