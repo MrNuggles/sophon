@@ -189,6 +189,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Rebuilds the tab bar from the panel registry after a Settings → Tabs
+/// change. A cheap no-op unless the enabled tabs actually changed.
+pub fn sync_tabs(app: &AppWindow) {
+    use slint::Model;
+    let reg = panels::panels();
+    let current = app.get_tab_ids();
+    if current.row_count() == reg.len()
+        && (0..reg.len()).all(|i| current.row_data(i).is_some_and(|id| id.as_str() == reg[i].id))
+    {
+        return;
+    }
+    let labels: Vec<slint::SharedString> = reg.iter().map(|p| p.title.into()).collect();
+    let ids: Vec<slint::SharedString> = reg.iter().map(|p| p.id.into()).collect();
+    app.set_tab_labels(slint::ModelRc::new(slint::VecModel::from(labels)));
+    app.set_tab_ids(slint::ModelRc::new(slint::VecModel::from(ids)));
+    // The current tab may have shifted or vanished; re-resolve what's shown.
+    let tab = app.get_tab().clamp(0, reg.len() as i32 - 1);
+    app.set_tab(tab);
+    app.invoke_tab_changed(tab);
+}
+
 fn sampler_loop(wake: mpsc::Receiver<()>, shared: Arc<Shared>) {
     let mut sampler = match Sampler::new() {
         Ok(s) => s,

@@ -128,6 +128,9 @@ pub struct Settings {
     pub docker_servers: Vec<(String, String)>,
     pub docker_sort: usize,
     pub docker_sort_desc: bool,
+    // Optional tabs (Settings → Tabs). A tab must also be compiled in
+    // (--features docker) before it can be toggled here.
+    pub tabs_docker: bool,
 }
 
 pub const UPDATE_MS: [u64; 5] = [500, 1000, 2000, 5000, 0];
@@ -204,6 +207,7 @@ impl Default for Settings {
             docker_servers: Vec::new(),
             docker_sort: 0,
             docker_sort_desc: false,
+            tabs_docker: true,
         }
     }
 }
@@ -349,6 +353,7 @@ impl Settings {
                 }
                 "docker.sort" => self.docker_sort = n(),
                 "docker.sort_desc" => self.docker_sort_desc = b(),
+                "tabs.docker" => self.tabs_docker = b(),
                 _ => {}
             }
         }
@@ -448,6 +453,7 @@ impl Settings {
         }
         kv("docker.sort", self.docker_sort.to_string());
         kv("docker.sort_desc", self.docker_sort_desc.to_string());
+        kv("tabs.docker", self.tabs_docker.to_string());
         o
     }
 }

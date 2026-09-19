@@ -40,6 +40,11 @@ struct Net {
     servers: Mutex<Vec<Server>>,
     /// Containers whose stats/inspect the poller should fetch (expanded rows).
     expanded: Mutex<HashSet<String>>,
+    /// Servers (host:port) whose header is collapsed; their containers' stats
+    /// are skipped — nothing hidden is polled.
+    collapsed: Mutex<HashSet<String>>,
+    /// The tab is enabled in Settings → Tabs; false parks the poller entirely.
+    enabled: AtomicBool,
     sort: AtomicU8,
     visible: AtomicBool,
     wake: mpsc::Sender<()>,
@@ -58,11 +63,15 @@ struct DockerUi {
     states: Vec<ServerState>,
     server_count: usize,
     expanded: HashSet<String>,
+    /// Server addresses (host:port) whose containers are hidden.
+    collapsed: HashSet<String>,
     sort: usize,
     sort_desc: bool,
     hist: HashMap<String, Hist>,
     latest: HashMap<String, Stats>,
     details: HashMap<String, Details>,
+    /// A stop awaiting the shared confirmation dialog: (container id, "stop").
+    pending: Option<(String, String)>,
     rows: std::rc::Rc<VecModel<DockerRow>>,
 }
 
@@ -88,6 +97,8 @@ pub fn install(app: &AppWindow) {
     let net = Arc::new(Net {
         servers: Mutex::new(servers.clone()),
         expanded: Mutex::new(HashSet::new()),
+        collapsed: Mutex::new(HashSet::new()),
+        enabled: AtomicBool::new(settings::get(|s| s.tabs_docker)),
         sort: AtomicU8::new(sort as u8),
         visible: AtomicBool::new(false),
         wake,
@@ -104,11 +115,13 @@ pub fn install(app: &AppWindow) {
         states: Vec::new(),
         server_count: servers.len(),
         expanded: HashSet::new(),
+        collapsed: HashSet::new(),
         sort,
         sort_desc,
         hist: HashMap::new(),
         latest: HashMap::new(),
         details: HashMap::new(),
+        pending: None,
         rows,
     }));
 
@@ -117,6 +130,12 @@ pub fn install(app: &AppWindow) {
     });
     g.on_server_op(|idx, op| {
         with(|d| d.server_op(idx as usize, &op));
+    });
+    g.on_toggle_server(|idx| {
+        with(|d| d.toggle_server(idx.max(0) as usize));
+    });
+    g.on_rename_server(|idx, name| {
+        with(|d| d.rename_server(idx.max(0) as usize, &name));
     });
     g.on_add_server(|name, addr| {
         with(|d| d.add_server(&name, &addr));
@@ -141,8 +160,47 @@ pub fn set_visible(visible: bool) {
     });
 }
 
+/// Runs the stop the confirmation dialog was holding, if any.
+pub fn confirm_accepted() {
+    with(|d| {
+        if let Some((id, op)) = d.pending.take() {
+            d.run_action(&id, &op);
+        }
+    });
+}
+
+/// Drops a pending stop confirmation without acting.
+pub fn cancel_confirm() {
+    with(|d| d.pending = None);
+}
+
+/// Enables or disables the whole tab (Settings → Tabs). Disabled, the poller
+/// parks and every bit of its data is dropped.
+pub fn set_enabled(on: bool) {
+    with(|d| {
+        if d.net.enabled.swap(on, Relaxed) == on {
+            return;
+        }
+        if !on {
+            d.expanded.clear();
+            d.collapsed.clear();
+            d.hist.clear();
+            d.latest.clear();
+            d.details.clear();
+            d.states.clear();
+            d.net.expanded.lock().unwrap().clear();
+            d.net.collapsed.lock().unwrap().clear();
+        }
+        let _ = d.net.wake.send(());
+        render_rows(d);
+    });
+}
+
 fn apply(poll: Poll) {
     with(|d| {
+        if !d.net.enabled.load(Relaxed) {
+            return; // the tab was disabled mid-flight; drop the stale poll
+        }
         d.states = poll.states;
         // Latest stats (for sorting) and expanded history (for graphs).
         for (id, s) in &poll.stats {
@@ -160,15 +218,25 @@ fn apply(poll: Poll) {
         d.hist.retain(|id, _| live.contains(id.as_str()));
         d.latest.retain(|id, _| live.contains(id.as_str()));
         d.details.retain(|id, _| live.contains(id.as_str()));
+        d.sync_expanded();
         render_rows(d);
     });
 }
 
 fn poller(net: Arc<Net>, wake: mpsc::Receiver<()>) {
     loop {
+        // Settings → Tabs off: the whole tab is dormant — nothing is fetched
+        // until it's turned back on.
+        if !net.enabled.load(Relaxed) {
+            if wake.recv().is_err() {
+                return;
+            }
+            continue;
+        }
         let servers = net.servers.lock().unwrap().clone();
         let visible = net.visible.load(Relaxed);
         let expanded = if visible { net.expanded.lock().unwrap().clone() } else { HashSet::new() };
+        let collapsed = net.collapsed.lock().unwrap().clone();
         // Fetch all running containers' stats only to sort by usage, and only
         // while the tab is visible — otherwise `list` alone keeps state fresh.
         let sort_usage = visible && matches!(net.sort.load(Relaxed) as usize, 4 | 5);
@@ -178,8 +246,10 @@ fn poller(net: Arc<Net>, wake: mpsc::Receiver<()>) {
             .iter()
             .map(|srv| match sophon_docker::list(srv) {
                 Ok(cs) => {
+                    // A collapsed header hides its containers; skip their stats.
+                    let srv_collapsed = collapsed.contains(&format!("{}:{}", srv.host, srv.port));
                     for c in &cs {
-                        if !c.running() {
+                        if srv_collapsed || !c.running() {
                             continue;
                         }
                         let want_stats = expanded.contains(&c.id) || sort_usage;
@@ -215,6 +285,30 @@ impl DockerUi {
     }
 
     fn container_action(&mut self, id: &str, op: &str) {
+        // Stopping is destructive, so it asks first (start/restart stay one
+        // click, matching every Docker UI).
+        if op == "stop" {
+            return self.confirm_stop(id);
+        }
+        self.run_action(id, op);
+    }
+
+    /// Shows the shared confirmation dialog for stopping a container.
+    fn confirm_stop(&mut self, id: &str) {
+        let Some(name) = self.states.iter().flat_map(|s| &s.containers).find(|c| c.id == id).map(|c| c.name.clone()) else { return };
+        // Only one confirm may be armed at a time; opening ours retires any
+        // pending Processes action (ui.rs does the same for us).
+        crate::ui::cancel_confirm();
+        self.pending = Some((id.to_string(), "stop".into()));
+        if let Some(app) = self.app.upgrade() {
+            app.set_confirm_button("Stop container".into());
+            app.set_confirm_text(
+                format!("Stop {name}?\n\nDocker will ask it to close and force it off after 10 seconds. Nothing is deleted — you can start it again any time.").into(),
+            );
+        }
+    }
+
+    fn run_action(&self, id: &str, op: &str) {
         let Some(server) = self.find_server(id) else { return };
         let name = self.states.iter().flat_map(|s| &s.containers).find(|c| c.id == id).map(|c| c.name.clone()).unwrap_or_default();
         let (id, op) = (id.to_string(), op.to_string());
@@ -236,9 +330,54 @@ impl DockerUi {
         if !self.expanded.remove(id) {
             self.expanded.insert(id.to_string());
         }
-        *self.net.expanded.lock().unwrap() = self.expanded.clone();
+        self.sync_expanded();
         let _ = self.net.wake.send(()); // fetch its stats/details promptly
         render_rows(self);
+    }
+
+    /// Shows or hides one server's containers (its header was clicked).
+    fn toggle_server(&mut self, idx: usize) {
+        let Some(st) = self.states.get(idx) else { return };
+        if !self.collapsed.remove(&server_key(&st.server)) {
+            self.collapsed.insert(server_key(&st.server));
+        }
+        self.sync_expanded();
+        render_rows(self);
+    }
+
+    /// Renames a server (right-click its header → Rename). The config entry is
+    /// matched by address, the stable part; an empty name falls back to the
+    /// address, like adding a server without one.
+    fn rename_server(&mut self, idx: usize, name: &str) {
+        let Some(st) = self.states.get(idx) else { return };
+        let name = name.trim();
+        let name = if name.is_empty() { format!("{}:{}", st.server.host, st.server.port) } else { name.to_string() };
+        let addr = server_key(&st.server);
+        settings::update(|s| {
+            if let Some((n, _)) = s.docker_servers.iter_mut().find(|(_, a)| *a == addr) {
+                *n = name.clone();
+            }
+        });
+        // Show it immediately; the next poll carries it everywhere else.
+        if let Some(st) = self.states.get_mut(idx) {
+            st.server.name = name;
+        }
+        self.reload_servers();
+    }
+
+    /// Publishes what the poller should fetch: details for expanded rows, minus
+    /// anything under a collapsed server header — nothing hidden is polled.
+    fn sync_expanded(&mut self) {
+        let mut hidden: HashSet<String> = HashSet::new();
+        let mut collapsed: HashSet<String> = HashSet::new();
+        for st in &self.states {
+            if self.collapsed.contains(&server_key(&st.server)) {
+                collapsed.insert(server_key(&st.server));
+                hidden.extend(st.containers.iter().map(|c| c.id.clone()));
+            }
+        }
+        *self.net.expanded.lock().unwrap() = self.expanded.difference(&hidden).cloned().collect();
+        *self.net.collapsed.lock().unwrap() = collapsed;
     }
 
     fn set_sort(&mut self, key: usize) {
@@ -308,6 +447,7 @@ fn render_rows(d: &mut DockerUi) {
     let mut rows: Vec<DockerRow> = Vec::new();
     let (mut total, mut running) = (0usize, 0usize);
     for (i, st) in d.states.iter().enumerate() {
+        let open = !d.collapsed.contains(&server_key(&st.server));
         let status = match &st.error {
             Some(e) => e.clone(),
             None => {
@@ -321,18 +461,23 @@ fn render_rows(d: &mut DockerUi) {
             name: st.server.name.as_str().into(),
             server_status: status.into(),
             server_error: st.error.is_some(),
+            expanded: open,
             ..Default::default()
         });
         let mut cs: Vec<&Container> = st.containers.iter().collect();
         self_sort(&mut cs, d.sort, d.sort_desc, &d.latest);
         for c in cs {
+            // The summary counts every server's containers, shown or not.
             total += 1;
             if c.running() {
                 running += 1;
             }
-            let open = d.expanded.contains(&c.id);
-            rows.push(container_row(c, i, open));
-            if open {
+            if !open {
+                continue;
+            }
+            let is_open = d.expanded.contains(&c.id);
+            rows.push(container_row(c, i, is_open));
+            if is_open {
                 rows.push(detail_row(c, i, d));
             }
         }
@@ -449,6 +594,11 @@ fn detail_row(c: &Container, server: usize, d: &DockerUi) -> DockerRow {
         running: c.running(),
         ..Default::default()
     }
+}
+
+/// Stable key for a server (its address), so collapse state survives reloads.
+fn server_key(s: &Server) -> String {
+    format!("{}:{}", s.host, s.port)
 }
 
 fn state_color(state: &str) -> Color {

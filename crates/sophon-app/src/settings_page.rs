@@ -10,8 +10,15 @@ use crate::graph::rgb;
 use crate::settings::{self, COLUMNS, SWATCHES, Settings, TRAY_SECS, UPDATE_MS};
 use crate::{AppWindow, SettingItem, SettingsPage, Shared, Theme};
 
-pub const CATEGORIES: [&str; 7] =
-    ["General", "Appearance", "Resource use", "Processes tab", "Performance tab", "Space map", "Tray"];
+/// Settings categories, in display order. "Tabs" (the optional tabs) exists
+/// only in builds that have some — feature "docker" today.
+pub fn categories() -> Vec<&'static str> {
+    let mut v =
+        vec!["General", "Appearance", "Resource use", "Processes tab", "Performance tab", "Space map", "Tray"];
+    #[cfg(feature = "docker")]
+    v.push("Tabs");
+    v
+}
 
 struct Page {
     app: slint::Weak<AppWindow>,
@@ -38,7 +45,7 @@ pub fn install(app: &AppWindow, shared: Arc<Shared>) {
     let items = std::rc::Rc::new(VecModel::default());
     let g = app.global::<SettingsPage>();
     g.set_items(ModelRc::from(items.clone()));
-    g.set_categories(ModelRc::new(VecModel::from(CATEGORIES.iter().map(|c| SharedString::from(*c)).collect::<Vec<_>>())));
+    g.set_categories(ModelRc::new(VecModel::from(categories().iter().map(|c| SharedString::from(*c)).collect::<Vec<_>>())));
     g.set_swatches(ModelRc::new(VecModel::from(SWATCHES.iter().map(|&c| rgb(c)).collect::<Vec<Color>>())));
     PAGE.set(Some(Page {
         app: app.as_weak(),
@@ -223,7 +230,12 @@ pub fn apply_all() {
         t.set_graph_style(s.graph_style as i32);
         t.set_line_scale(s.line_width);
         t.set_graph_grid(s.graph_grid);
+        // Rebuild the tab bar in case a Settings → Tabs toggle changed the set.
+        crate::sync_tabs(&app);
     }
+    // Optional tabs go live here: the Docker poller parks while hidden.
+    #[cfg(feature = "docker")]
+    crate::docker_panel::set_enabled(s.tabs_docker);
     crate::graph::set_style(s.graph_style);
     crate::fmt::set_fahrenheit(s.fahrenheit);
     shared.interval_ms.store(UPDATE_MS[s.update_speed], Relaxed);
@@ -237,7 +249,8 @@ pub fn refresh() {
     let Some((items, rows)) = with(|p| {
         let all = build(&s, p);
         let rows: Vec<SettingItem> = if p.search.is_empty() {
-            all.into_iter().filter(|i| i.category.as_str() == CATEGORIES[p.category]).collect()
+            let cat = categories().get(p.category).copied().unwrap_or("");
+            all.into_iter().filter(move |i| i.category.as_str() == cat).collect()
         } else {
             all.into_iter()
                 .filter(|i| {
@@ -328,9 +341,10 @@ fn ordered_tiles(order: &[String], known: &[String]) -> Vec<String> {
 
 fn build(s: &Settings, p: &Page) -> Vec<SettingItem> {
     let d = Settings::default();
+    let cats = categories();
     let mut v = Vec::new();
 
-    let c = CATEGORIES[0];
+    let c = cats[0];
     v.push(heading(c, "STARTUP"));
     v.push(toggle(c, "autostart", "Start at login", "Launch Sophon automatically when you sign in.", s.autostart, d.autostart));
     v.push(toggle(c, "start_in_tray", "Start hidden in the tray", "When starting at login, go straight to the tray instead of opening the window.", s.start_in_tray, d.start_in_tray));
@@ -353,7 +367,7 @@ fn build(s: &Settings, p: &Page) -> Vec<SettingItem> {
     });
     v.push(toggle(c, "admin_on_start", "Enable admin features when Sophon starts", "Ask for your password at startup instead of when you first need it.", s.admin_on_start, d.admin_on_start));
 
-    let c = CATEGORIES[1];
+    let c = cats[1];
     v.push(heading(c, "THEME"));
     v.push(choice(c, "theme", "Theme", "Follow your desktop, or pick one.", &["System", "Light", "Dark"], s.theme, d.theme));
     v.push(toggle(c, "accent_follow", "Follow desktop accent colour", "Use your KDE or GNOME accent colour for highlights.", s.accent_follow, d.accent_follow));
@@ -382,7 +396,7 @@ fn build(s: &Settings, p: &Page) -> Vec<SettingItem> {
     v.push(slider(c, "line_width", "Line thickness", "Thickness of graph lines.", s.line_width, d.line_width, (0.5, 3.0, 0.1), format!("{:.1}×", s.line_width)));
     v.push(toggle(c, "graph_grid", "Grid lines", "Faint guide lines behind graphs.", s.graph_grid, d.graph_grid));
 
-    let c = CATEGORIES[2];
+    let c = cats[2];
     v.push(heading(c, "UPDATES"));
     v.push(choice(c, "update_speed", "Update speed", "How often numbers refresh while the window is open. Faster costs a little more CPU; Paused freezes everything.", &["0.5 s", "1 s", "2 s", "5 s", "Paused"], s.update_speed, d.update_speed));
     v.push(choice(c, "tray_rate", "Updates while in the tray", "Keeps the tray summary and Rewind history going. Off uses nothing while Sophon sits in the tray.", &["5 s", "10 s", "30 s", "Off"], s.tray_rate, d.tray_rate));
@@ -393,7 +407,7 @@ fn build(s: &Settings, p: &Page) -> Vec<SettingItem> {
     }
     v.push(toggle(c, "show_own_usage", "Show Sophon's own usage", "Shows Sophon's CPU and memory in the status bar.", s.show_own_usage, d.show_own_usage));
 
-    let c = CATEGORIES[3];
+    let c = cats[3];
     v.push(heading(c, "COLUMNS"));
     let labels: Vec<SharedString> = s.columns.iter().map(|id| COLUMNS.iter().find(|c| c.0 == id).map_or(id.as_str(), |c| c.1).into()).collect();
     let flags: Vec<bool> = s.columns.iter().map(|id| !s.hidden_columns.contains(id)).collect();
@@ -422,7 +436,7 @@ fn build(s: &Settings, p: &Page) -> Vec<SettingItem> {
     v.push(choice(c, "double_click", "Double-click a row", "What double-clicking a process or app does.", &["Details", "Expand", "Open location"], s.double_click, d.double_click));
     v.push(choice(c, "delete_key", "Delete key", "What pressing Delete does to the selection.", &["End task", "Ask first", "Force kill"], s.delete_key, d.delete_key));
 
-    let c = CATEGORIES[4];
+    let c = cats[4];
     v.push(heading(c, "DEVICES"));
     let known: Vec<String> = p.tiles.iter().map(|t| t.0.clone()).collect();
     let order = ordered_tiles(&s.tile_order, &known);
@@ -454,7 +468,7 @@ fn build(s: &Settings, p: &Page) -> Vec<SettingItem> {
     v.push(choice(c, "fahrenheit", "Temperature", "", &["°C", "°F"], s.fahrenheit as usize, d.fahrenheit as usize));
     v.push(toggle(c, "show_power", "Show power draw", "CPU package and GPU power graphs and figures.", s.show_power, d.show_power));
 
-    let c = CATEGORIES[5];
+    let c = cats[5];
     v.push(heading(c, "SCANNING"));
     let mut drives = vec!["Home drive"];
     let mounts: Vec<&str> = p.mounts.iter().map(String::as_str).collect();
@@ -478,13 +492,27 @@ fn build(s: &Settings, p: &Page) -> Vec<SettingItem> {
     v.push(choice(c, "space_color", "Colour blocks by", "Folder gives each top-level folder its own colour; File type colours by what's inside (video, games, code…); Age shows recently changed files brightest.", &["Folder", "File type", "Age"], s.space_color, d.space_color));
     v.push(slider(c, "space_min_block", "Smallest block", "Blocks smaller than this are left out, keeping the map readable.", s.space_min_block, d.space_min_block, (1.0, 12.0, 1.0), format!("{:.0} px", s.space_min_block)));
 
-    let c = CATEGORIES[6];
+    let c = cats[6];
     v.push(heading(c, "TRAY SUMMARY"));
     v.push(toggle(c, "tip_cpu", "CPU", "Shown when hovering the tray icon.", s.tip_cpu, d.tip_cpu));
     v.push(toggle(c, "tip_ram", "Memory", "", s.tip_ram, d.tip_ram));
     v.push(toggle(c, "tip_gpu", "GPU", "", s.tip_gpu, d.tip_gpu));
     v.push(toggle(c, "tip_temps", "Temperatures", "CPU and GPU temperatures.", s.tip_temps, d.tip_temps));
     v.push(toggle(c, "tip_net", "Network", "Download and upload rates.", s.tip_net, d.tip_net));
+
+    #[cfg(feature = "docker")]
+    {
+        let c = "Tabs";
+        v.push(heading(c, "OPTIONAL TABS"));
+        v.push(toggle(
+            c,
+            "tabs_docker",
+            "Docker",
+            "Show the Docker tab: containers on your LAN servers, with live graphs and start / stop / restart. It must also be compiled in (--features docker); while hidden here, nothing at all is fetched.",
+            s.tabs_docker,
+            d.tabs_docker,
+        ));
+    }
     v
 }
 
@@ -495,6 +523,7 @@ fn set_bool(s: &mut Settings, id: &str, v: bool) {
         "autostart" => s.autostart = v,
         "start_in_tray" => s.start_in_tray = v,
         "admin_on_start" => s.admin_on_start = v,
+        "tabs_docker" => s.tabs_docker = v,
         "accent_follow" => s.accent_follow = v,
         "graph_grid" => s.graph_grid = v,
         "show_own_usage" => s.show_own_usage = v,
@@ -614,6 +643,7 @@ fn get_bool(s: &Settings, id: &str) -> Option<bool> {
         "autostart" => s.autostart,
         "start_in_tray" => s.start_in_tray,
         "admin_on_start" => s.admin_on_start,
+        "tabs_docker" => s.tabs_docker,
         "accent_follow" => s.accent_follow,
         "graph_grid" => s.graph_grid,
         "show_own_usage" => s.show_own_usage,

@@ -111,6 +111,11 @@ export component AppWindow inherits Window {
                 search.focus-input();
                 return accept;
             }
+            if (event.text == Key.Escape && root.confirm-text != "") {
+                root.confirm-cancelled();
+                keys.focus();
+                return accept;
+            }
             if (event.text == Key.Escape && root.current-id == "performance") {
                 Space.select(-1, false);
                 return accept;

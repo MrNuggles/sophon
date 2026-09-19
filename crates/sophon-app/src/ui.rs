@@ -253,6 +253,9 @@ pub fn install(app: &AppWindow, shared: Arc<Shared>) {
                 ui.run_action(&action);
             }
         });
+        // The same dialog also serves the Docker tab's stop confirmation.
+        #[cfg(feature = "docker")]
+        crate::docker_panel::confirm_accepted();
     });
     app.on_confirm_cancelled(|| {
         with(|ui| {
@@ -261,6 +264,8 @@ pub fn install(app: &AppWindow, shared: Arc<Shared>) {
                 app.set_confirm_text(SharedString::new());
             }
         });
+        #[cfg(feature = "docker")]
+        crate::docker_panel::cancel_confirm();
     });
     app.on_go(|pid| {
         with(|ui| ui.go(pid as u32));
@@ -348,6 +353,13 @@ pub fn set_tray(tray: slint::Weak<Tray>) {
 /// Shows a short message at the bottom of the window.
 pub fn toast(msg: impl Into<SharedString>) {
     with(|ui| ui.toast(msg));
+}
+
+/// Drops a pending Processes confirmation without acting (the Docker tab is
+/// taking over the shared dialog).
+#[cfg(feature = "docker")]
+pub fn cancel_confirm() {
+    with(|ui| ui.pending = None);
 }
 
 /// Called with each new snapshot from the sampler thread (via the event loop).
@@ -859,6 +871,10 @@ impl Ui {
     /// Shows the confirmation dialog for a destructive action on the selection.
     fn confirm(&mut self, action: &str) {
         let Some(app) = self.app.upgrade() else { return };
+        // Only one confirm may be armed at a time; opening ours retires any
+        // pending Docker stop (docker_panel.rs does the same for us).
+        #[cfg(feature = "docker")]
+        crate::docker_panel::cancel_confirm();
         let what = match &self.selected {
             Sel::Pid(pid) => self.snap.processes.iter().find(|p| p.pid == *pid).map(|p| format!("{} (PID {pid})", p.display_name())),
             Sel::Group(key) => {

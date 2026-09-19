@@ -19,6 +19,8 @@ export struct DockerRow {
     status: string,
     ports: string,
     running: bool,
+    /// Container: the row is expanded (its detail panel shows). Server header:
+    /// the server's containers are shown.
     expanded: bool,
     // Server header (kind 0):
     server-status: string,
@@ -41,6 +43,10 @@ export global DockerPage {
     callback action(string, string);
     /// Server op: "refresh" | "remove", with the server index.
     callback server-op(int, string);
+    /// Show or hide a server's containers (click its header).
+    callback toggle-server(int);
+    /// Rename a server (right-click its header → Rename, then Enter).
+    callback rename-server(int, string);
     callback add-server(string, string);
     /// Expand or collapse a container by id.
     callback toggle(string);
@@ -299,43 +305,118 @@ component DetailPanel inherits Rectangle {
 component ServerHeader inherits Rectangle {
     in property <DockerRow> item;
     callback op(string);
+    callback toggle();
+    /// Rename was committed with a new name (Enter in the inline field).
+    callback rename(string);
+    property <bool> renaming: false;
     height: 40px;
-    HorizontalLayout {
-        padding-left: 14px;
-        padding-right: 14px;
-        spacing: 8px;
-        VerticalLayout {
-            alignment: center;
-            StateDot {
-                tint: root.item.server-error ? Theme.danger : Theme.gpu;
+    background: ta.has-hover ? Theme.hover : transparent;
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.toggle();
+        }
+    }
+    ContextMenuArea {
+        Menu {
+            MenuItem {
+                title: root.item.expanded ? "Hide containers" : "Show containers";
+                activated => {
+                    root.toggle();
+                }
+            }
+            MenuItem {
+                title: "Rename";
+                activated => {
+                    root.renaming = true;
+                }
+            }
+            MenuItem {
+                title: "Refresh";
+                activated => {
+                    root.op("refresh");
+                }
+            }
+            MenuItem {
+                title: "Remove server";
+                activated => {
+                    root.op("remove");
+                }
             }
         }
-        Text {
-            text: root.item.name;
-            font-size: 13px * Theme.font-scale;
-            font-weight: 700;
-            color: Theme.text;
-            vertical-alignment: center;
-        }
-        Text {
-            text: root.item.server-status;
-            font-size: 11.5px * Theme.font-scale;
-            color: root.item.server-error ? Theme.danger : Theme.dim;
-            vertical-alignment: center;
-            horizontal-stretch: 1;
-        }
-        ActionBtn {
-            icon: "M 20 11 A 8 8 0 1 0 19 15 M 20 5 L 20 11 L 14 11";
-            tint: Theme.accent;
-            clicked => {
-                root.op("refresh");
+        HorizontalLayout {
+            padding-left: 14px;
+            padding-right: 14px;
+            spacing: 8px;
+            Rectangle {
+                width: 14px;
+                Icon {
+                    width: 13px;
+                    height: 13px;
+                    icon: root.item.expanded ? "M 6 9 L 12 15 L 18 9" : "M 9 6 L 15 12 L 9 18";
+                    color: Theme.dim;
+                }
             }
-        }
-        ActionBtn {
-            icon: "M 6 6 L 18 18 M 18 6 L 6 18";
-            tint: Theme.danger;
-            clicked => {
-                root.op("remove");
+            VerticalLayout {
+                alignment: center;
+                StateDot {
+                    tint: root.item.server-error ? Theme.danger : Theme.gpu;
+                }
+            }
+            if root.renaming: rename-scope := FocusScope {
+                width: 180px;
+                key-pressed(event) => {
+                    if (event.text == Key.Escape) {
+                        root.renaming = false;
+                        return accept;
+                    }
+                    reject
+                }
+                name-in := TextInput {
+                    width: parent.width;
+                    height: parent.height;
+                    vertical-alignment: center;
+                    single-line: true;
+                    color: Theme.text;
+                    font-size: 13px * Theme.font-scale;
+                    init => {
+                        name-in.text = root.item.name;
+                        name-in.focus();
+                        name-in.select-all();
+                    }
+                    accepted => {
+                        root.rename(name-in.text);
+                        root.renaming = false;
+                    }
+                }
+            }
+            if !root.renaming: Text {
+                text: root.item.name;
+                font-size: 13px * Theme.font-scale;
+                font-weight: 700;
+                color: Theme.text;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.item.server-status;
+                font-size: 11.5px * Theme.font-scale;
+                color: root.item.server-error ? Theme.danger : Theme.dim;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            ActionBtn {
+                icon: "M 20 11 A 8 8 0 1 0 19 15 M 20 5 L 20 11 L 14 11";
+                tint: Theme.accent;
+                clicked => {
+                    root.op("refresh");
+                }
+            }
+            ActionBtn {
+                icon: "M 6 6 L 18 18 M 18 6 L 6 18";
+                tint: Theme.danger;
+                clicked => {
+                    root.op("remove");
+                }
             }
         }
     }
@@ -500,6 +581,12 @@ export component DockerView inherits Rectangle {
                         item: row;
                         op(o) => {
                             DockerPage.server-op(row.server, o);
+                        }
+                        toggle => {
+                            DockerPage.toggle-server(row.server);
+                        }
+                        rename(n) => {
+                            DockerPage.rename-server(row.server, n);
                         }
                     }
                     if row.kind == 1: ContainerRow {

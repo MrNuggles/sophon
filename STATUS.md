@@ -52,7 +52,8 @@ cargo build --release --features docker && ./target/release/sophon
 
 **Settings** — live preview, search, per-setting reset; plain-text config.
 Seven categories (General, Appearance, Resource use, Processes, Performance,
-Space map, Tray).
+Space map, Tray), plus **Tabs** in builds with optional tabs — turn a tab like
+Docker on or off without a restart; a hidden tab fetches nothing at all.
 
 **Tray & window** — close sends Sophon to the tray (Steam-style, no taskbar
 entry); tray hover shows a live summary; Ctrl+Q / tray menu quits.
@@ -63,21 +64,29 @@ via a kernel eBPF counter.
 
 **Docker tab (optional, `--features docker`)** — connect to Docker on LAN
 servers via a socket proxy; list containers (running + stopped) with ports and
-server; sort by Ports / Name / State / Age / CPU / RAM; **expand a container**
-for live CPU/memory graphs and full details; start / stop / restart. Live
-updates; add/remove servers in-tab.
+server; **collapsible server headers**; sort by Ports / Name / State / Age /
+CPU / RAM; **expand a container** for live CPU/memory graphs and full details;
+start / stop / restart (stopping asks first). Right-click a header to
+show/hide its containers or rename the server. Live updates; add/remove servers
+in-tab; hide the whole tab from Settings → Tabs (its poller then parks).
 
 ## Verified vs. not verified
 
 - **Verified here:** all builds, 30 unit tests, every view rendered to PNG
   (snapshot mode), the local sampler against this machine, the Docker client
   end-to-end against a mock API (list / stats / inspect / start / stop, sorting,
-  expand, error handling), and resource-use measurements.
+  expand, error handling), and resource-use measurements. The stop confirmation
+  and collapsible headers were verified against the mock and a live server
+  (read-only — snapshot mode never accepts the dialog; the mock's request log
+  showed no control requests). Toggling the tab off and on from Settings → Tabs
+  was verified live (tab bar rebuilds, data re-fetches; screenshot pair).
+- **Verified by you:** the Docker tab against both of your real servers
+  (2026-09-19).
 - **Needs your hands (couldn't test from here):**
   - The two password-gated admin paths — killing a system process, and UDP
     per-app counting (the eBPF program loading as root).
-  - The Docker tab against your **real** servers (mock only, so far).
-  - Hover / drag / context-menu interactions that need a live mouse.
+  - Hover / drag / context-menu interactions that need a live mouse (including
+    the new header right-click menu, and Escape closing the stop dialog).
 
 ## Journey so far (high level)
 
@@ -94,13 +103,13 @@ updates; add/remove servers in-tab.
 8. **Rewind** — interactive, explorable graphs with spike-culprit markers.
 9. **Security audit** — no shell execution, bounds-checked parsing, isolated
    root helper; `SECURITY.md` + hardening.
-10. **Modular panels + Docker tab** (this branch) — panel registry, dependency-
-    free Docker client, expandable rows with graphs, sorting.
+10. **Modular panels + Docker tab** (v0.2) — panel registry, dependency-free
+    Docker client, expandable rows with graphs, sorting; then collapsible
+    server headers, stop confirmation, and a mock Docker API for offline
+    testing (`sophon-docker --example mock`).
 
 ## Open decisions / next steps
 
-- [ ] Optional: confirmation dialog on container **stop** (currently none, to
-      match Portainer/Docker Desktop).
 - [ ] Packaging for distribution: install the binary to a **root-owned** path
       and ship a **polkit policy** (required before admin features are safe on
       shared machines — see SECURITY.md).

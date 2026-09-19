@@ -24,8 +24,12 @@ pub fn panels() -> Vec<Panel> {
         Panel { id: "processes", title: "Processes" },
         Panel { id: "performance", title: "Performance" },
     ];
+    // Compiled in with the Cargo feature, then shown or hidden from
+    // Settings → Tabs (nothing is fetched while it's hidden).
     #[cfg(feature = "docker")]
-    v.push(Panel { id: "docker", title: "Docker" });
+    if crate::settings::get(|s| s.tabs_docker) {
+        v.push(Panel { id: "docker", title: "Docker" });
+    }
     v.push(Panel { id: "settings", title: "Settings" });
     v
 }

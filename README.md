@@ -48,6 +48,7 @@ for the trust model.
 - Performance tab: reorder/hide device tiles, CPU detail (total/thread/core), **history length (10 min / 1 h / 24 h)**, spike sensitivity, °C/°F
 - Space map: default drive, scan priority, hidden files, excluded folders, **colour by folder / file type / age**, remember scans
 - Tray: what the hover summary shows
+- Tabs: turn optional tabs on or off (Docker today) — live, no restart
 - Saved as plain text at `~/.config/sophon/settings.conf`
 
 **Admin features** (optional, opt-in)
@@ -69,9 +70,13 @@ feature tab is added in three small spots and gated behind a Cargo feature. The
 default build has only the built-in tabs and **no network code**.
 
 - **Docker** (`--features docker`): connect to Docker on your LAN servers, list
-  containers (running and stopped) with their published ports and server, and
-  start / stop / restart them live. Requires a socket proxy on each server —
-  see **[docs/docker.md](docs/docker.md)**.
+  containers (running and stopped) with their published ports and server,
+  collapse a server's header to hide its containers, and start / stop / restart
+  them live (stopping asks first). Right-click a server header to show/hide its
+  containers or rename it. Requires a socket proxy on each server —
+  see **[docs/docker.md](docs/docker.md)**. Once compiled in, the tab can be
+  hidden or shown again from **Settings → Tabs** — nothing at all is fetched
+  while it's hidden.
 
 ```bash
 cargo build --release --features docker
@@ -117,6 +122,9 @@ cargo run --release -p sophon-core --example bench
 
 # Time a space-map scan
 cargo run --release -p sophon-core --example space -- /home
+
+# A mock Docker API on 127.0.0.1:2376, for trying the Docker tab without a server
+cargo run --release -p sophon-docker --example mock
 
 # Render every view (dark + light) to PNGs, then exit
 SOPHON_SNAPSHOT=/tmp/shots ./target/release/sophon
