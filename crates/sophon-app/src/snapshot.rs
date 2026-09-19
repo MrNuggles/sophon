@@ -231,7 +231,7 @@ pub fn start(app: &AppWindow, dir: PathBuf) {
             }
             Some(Step::SettingsOpen(open)) => app.set_settings_open(open),
             Some(Step::TabId(id)) => {
-                let t = crate::panels::panels().iter().position(|p| p.id == id).unwrap_or(0) as i32;
+                let t = crate::panels::tabs().iter().position(|p| p.id() == id).unwrap_or(0) as i32;
                 app.set_settings_open(false);
                 app.set_tab(t);
                 app.invoke_tab_changed(t);

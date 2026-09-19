@@ -132,6 +132,10 @@ npm-mock`).
     connect form in-tab, proxy hosts with certificates, credentials stored
     locally (settings file now 0600); HTTP/JSON layer extracted to
     `sophon-net` for both clients.
+13. **Panel trait** — the tab registry became a `Tab` trait: each tab module
+    owns its controller (install, visibility, toggle), and `panels.rs` is the
+    one place that lists them. Adding a tab no longer touches ui.rs or
+    main.rs.
 
 ## Open decisions / next steps
 

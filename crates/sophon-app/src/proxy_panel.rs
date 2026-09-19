@@ -399,3 +399,24 @@ fn update_model(m: &VecModel<ProxyRow>, new: Vec<ProxyRow>) {
         }
     }
 }
+
+/// The registry handle: what panels.rs sees for this tab.
+pub struct Controller;
+
+impl crate::panels::Tab for Controller {
+    fn id(&self) -> &'static str {
+        "proxy"
+    }
+    fn title(&self) -> &'static str {
+        "Proxy"
+    }
+    fn enabled(&self) -> bool {
+        settings::get(|s| s.tabs_proxy)
+    }
+    fn install(&self, app: &AppWindow) {
+        install(app);
+    }
+    fn set_visible(&self, visible: bool) {
+        set_visible(visible);
+    }
+}

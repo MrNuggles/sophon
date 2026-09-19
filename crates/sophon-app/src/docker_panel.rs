@@ -644,3 +644,24 @@ fn update_model<T: Clone + PartialEq + 'static>(m: &VecModel<T>, new: Vec<T>) {
         }
     }
 }
+
+/// The registry handle: what panels.rs sees for this tab.
+pub struct Controller;
+
+impl crate::panels::Tab for Controller {
+    fn id(&self) -> &'static str {
+        "docker"
+    }
+    fn title(&self) -> &'static str {
+        "Docker"
+    }
+    fn enabled(&self) -> bool {
+        settings::get(|s| s.tabs_docker)
+    }
+    fn install(&self, app: &AppWindow) {
+        install(app);
+    }
+    fn set_visible(&self, visible: bool) {
+        set_visible(visible);
+    }
+}

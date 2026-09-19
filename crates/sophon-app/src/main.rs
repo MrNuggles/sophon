@@ -87,14 +87,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ui::install(&app, shared.clone());
     space_ui::install(&app);
     settings_page::install(&app, shared.clone());
-    #[cfg(feature = "docker")]
-    docker_panel::install(&app);
-    #[cfg(feature = "proxy")]
-    proxy_panel::install(&app);
+    for tab in panels::all_tabs() {
+        tab.install(&app);
+    }
     // Data-driven tab bar from the panel registry.
-    let reg = panels::panels();
-    let labels: Vec<slint::SharedString> = reg.iter().map(|p| p.title.into()).collect();
-    let ids: Vec<slint::SharedString> = reg.iter().map(|p| p.id.into()).collect();
+    let reg = panels::tabs();
+    let labels: Vec<slint::SharedString> = reg.iter().map(|p| p.title().into()).collect();
+    let ids: Vec<slint::SharedString> = reg.iter().map(|p| p.id().into()).collect();
     app.set_tab_labels(slint::ModelRc::new(slint::VecModel::from(labels)));
     app.set_tab_ids(slint::ModelRc::new(slint::VecModel::from(ids)));
 
@@ -197,15 +196,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// change. A cheap no-op unless the enabled tabs actually changed.
 pub fn sync_tabs(app: &AppWindow) {
     use slint::Model;
-    let reg = panels::panels();
+    let reg = panels::tabs();
     let current = app.get_tab_ids();
     if current.row_count() == reg.len()
-        && (0..reg.len()).all(|i| current.row_data(i).is_some_and(|id| id.as_str() == reg[i].id))
+        && (0..reg.len()).all(|i| current.row_data(i).is_some_and(|id| id.as_str() == reg[i].id()))
     {
         return;
     }
-    let labels: Vec<slint::SharedString> = reg.iter().map(|p| p.title.into()).collect();
-    let ids: Vec<slint::SharedString> = reg.iter().map(|p| p.id.into()).collect();
+    let labels: Vec<slint::SharedString> = reg.iter().map(|p| p.title().into()).collect();
+    let ids: Vec<slint::SharedString> = reg.iter().map(|p| p.id().into()).collect();
     app.set_tab_labels(slint::ModelRc::new(slint::VecModel::from(labels)));
     app.set_tab_ids(slint::ModelRc::new(slint::VecModel::from(ids)));
     // The current tab may have shifted or vanished; re-resolve what's shown.
