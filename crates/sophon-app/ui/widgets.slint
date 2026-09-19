@@ -1,0 +1,426 @@
+import { Theme } from "theme.slint";
+
+/// A time series as SVG path commands in a 1000x1000 viewbox.
+export struct Series {
+    line: string,
+    area: string,
+}
+
+/// A notable moment on a graph (a spike), with who caused it.
+export struct Marker {
+    x: float,
+    tip: string,
+    pid: int,
+}
+
+/// Shared state for exploring graphs: one crosshair across every graph on the page.
+export global Hover {
+    /// Crosshair position as a fraction of graph width; -1 when not hovering.
+    in-out property <float> x: -1;
+    /// Key of the graph under the mouse.
+    in-out property <string> graph;
+    /// Bumped each tick so hover text stays current.
+    in property <int> epoch;
+    in property <bool> live: true;
+    in property <string> start-label: "60 seconds";
+    in property <string> end-label: "now";
+    in-out property <int> range: 0;
+    in property <[string]> ranges: ["1 min", "5 min", "10 min"];
+    /// Text for the tooltip of graph `key` at fraction `x`.
+    pure callback probe(string, float, int) -> string;
+    /// Zoom into the fraction range [from, to] of the visible time span.
+    callback zoom(float, float);
+    callback reset();
+    callback set-range(int);
+    callback marker(int);
+}
+
+export component Graph inherits Rectangle {
+    /// Identifies the series for hover text; empty makes the graph non-interactive.
+    in property <string> key;
+    in property <[Marker]> markers;
+    property <bool> interactive: root.key != "";
+    property <length> drag-from;
+    property <bool> dragging;
+    property <int> hover-marker: -1;
+    in property <Series> a;
+    in property <Series> b;
+    in property <bool> has-b: false;
+    in property <color> color-a: Theme.accent;
+    in property <color> color-b: Theme.accent;
+    in property <bool> show-grid: true;
+    in property <length> line-width: 1.5px;
+    background: Theme.graph-bg;
+    border-radius: 8px * Theme.round;
+    border-width: 1px;
+    border-color: root.color-a.with-alpha(0.28);
+    clip: true;
+
+    if root.show-grid && Theme.graph-grid: Rectangle {
+        for i in 3: Rectangle {
+            x: 0;
+            y: parent.height * (i + 1) / 4;
+            width: parent.width;
+            height: 1px;
+            background: Theme.grid;
+        }
+        for i in 5: Rectangle {
+            y: 0;
+            x: parent.width * (i + 1) / 6;
+            width: 1px;
+            height: parent.height;
+            background: Theme.grid;
+        }
+    }
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 1000;
+        viewbox-height: 1000;
+        fit: fill;
+        commands: root.a.area;
+        stroke-width: 0px;
+        fill: Theme.graph-style == 0 ? @linear-gradient(180deg, root.color-a.with-alpha(0.42) 0%, root.color-a.with-alpha(0.03) 100%)
+            : Theme.graph-style == 2 ? transparent
+            : Theme.graph-style == 3 ? root.color-a.with-alpha(0.75) : root.color-a.with-alpha(0.3);
+    }
+    if root.has-b: Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 1000;
+        viewbox-height: 1000;
+        fit: fill;
+        commands: root.b.area;
+        stroke-width: 0px;
+        fill: Theme.graph-style == 0 ? @linear-gradient(180deg, root.color-b.with-alpha(0.30) 0%, root.color-b.with-alpha(0.02) 100%)
+            : Theme.graph-style == 2 ? transparent
+            : Theme.graph-style == 3 ? root.color-b.with-alpha(0.6) : root.color-b.with-alpha(0.22);
+    }
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 1000;
+        viewbox-height: 1000;
+        fit: fill;
+        commands: root.a.line;
+        stroke: root.color-a;
+        stroke-width: Theme.graph-style == 3 ? 0px : root.line-width * Theme.line-scale;
+    }
+    if root.has-b: Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 1000;
+        viewbox-height: 1000;
+        fit: fill;
+        commands: root.b.line;
+        stroke: root.color-b;
+        stroke-width: Theme.graph-style == 3 ? 0px : root.line-width * Theme.line-scale;
+    }
+
+    // Crosshair, drawn on every graph of the page at the same moment.
+    if root.interactive && Hover.x >= 0: Rectangle {
+        x: root.width * Hover.x;
+        y: 0;
+        width: 1px;
+        height: root.height;
+        background: Theme.text.with-alpha(Hover.graph == root.key ? 0.6 : 0.25);
+    }
+    if root.dragging: Rectangle {
+        x: min(root.drag-from, ta.mouse-x);
+        y: 0;
+        width: abs(ta.mouse-x - root.drag-from);
+        height: root.height;
+        background: Theme.accent.with-alpha(0.15);
+        border-width: 1px;
+        border-color: Theme.accent.with-alpha(0.6);
+    }
+    ta := TouchArea {
+        enabled: root.interactive;
+        mouse-cursor: root.interactive ? MouseCursor.crosshair : MouseCursor.default;
+        changed mouse-x => {
+            if (self.has-hover) {
+                Hover.graph = root.key;
+                Hover.x = max(0, min(1, self.mouse-x / root.width));
+            }
+        }
+        changed has-hover => {
+            if (!self.has-hover && Hover.graph == root.key) {
+                Hover.x = -1;
+                Hover.graph = "";
+            }
+        }
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                root.drag-from = self.mouse-x;
+                root.dragging = true;
+            }
+            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.up && root.dragging) {
+                root.dragging = false;
+                if (abs(self.mouse-x - root.drag-from) > 8px) {
+                    Hover.zoom(max(0, min(self.mouse-x, root.drag-from) / root.width), min(1, max(self.mouse-x, root.drag-from) / root.width));
+                }
+            }
+        }
+        double-clicked => {
+            Hover.reset();
+        }
+    }
+    for m[i] in root.markers: Rectangle {
+        x: root.width * m.x - 7px;
+        y: 2px;
+        width: 14px;
+        height: 14px;
+        Path {
+            width: 12px;
+            height: 10px;
+            viewbox-width: 12;
+            viewbox-height: 10;
+            commands: "M 0 0 L 12 0 L 6 10 Z";
+            fill: mta.has-hover ? Theme.text : Theme.heat;
+            stroke: Theme.graph-bg;
+            stroke-width: 1px;
+        }
+        mta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => {
+                Hover.marker(m.pid);
+            }
+            changed has-hover => {
+                if (self.has-hover) {
+                    root.hover-marker = i;
+                } else if (root.hover-marker == i) {
+                    root.hover-marker = -1;
+                }
+            }
+        }
+    }
+    if root.interactive && root.hover-marker < 0 && Hover.graph == root.key && Hover.x >= 0: Rectangle {
+        x: max(4px, min(root.width * Hover.x + 12px, root.width - self.width - 4px));
+        y: 18px;
+        width: probe-text.preferred-width + 18px;
+        height: probe-text.preferred-height + 10px;
+        border-radius: 6px * Theme.round;
+        background: Theme.dark ? #262b38ee : #1f2330ee;
+        probe-text := Text {
+            text: Hover.probe(root.key, Hover.x, Hover.epoch);
+            color: #ffffff;
+            font-size: 11px * Theme.font-scale;
+        }
+    }
+    if root.hover-marker >= 0 && root.hover-marker < root.markers.length: Rectangle {
+        x: max(4px, min(root.width * root.markers[root.hover-marker].x + 10px, root.width - self.width - 4px));
+        y: 18px;
+        width: marker-text.preferred-width + 18px;
+        height: marker-text.preferred-height + 10px;
+        border-radius: 6px * Theme.round;
+        background: Theme.dark ? #262b38ee : #1f2330ee;
+        marker-text := Text {
+            text: root.markers[root.hover-marker].tip;
+            color: #ffffff;
+            font-size: 11px * Theme.font-scale;
+        }
+    }
+}
+
+export component Avatar inherits Rectangle {
+    in property <string> letter;
+    in property <color> tint;
+    in property <length> size: 22px;
+    width: root.size;
+    height: root.size;
+    border-radius: root.size * 0.3;
+    background: root.tint.with-alpha(Theme.dark ? 0.2 : 0.16);
+    Text {
+        text: root.letter;
+        color: Theme.dark ? root.tint : root.tint.darker(0.45);
+        font-size: root.size * 0.5;
+        font-weight: 700;
+    }
+}
+
+/// A 24x24-viewbox stroked icon.
+export component Icon inherits Path {
+    in property <string> icon;
+    in property <color> color: Theme.dim;
+    width: 18px;
+    height: 18px;
+    viewbox-width: 24;
+    viewbox-height: 24;
+    commands: root.icon;
+    stroke: root.color;
+    stroke-width: 1.8px;
+}
+
+export component IconButton inherits Rectangle {
+    in property <string> icon;
+    callback clicked;
+    width: 34px;
+    height: 34px;
+    border-radius: 9px * Theme.round;
+    background: ta.pressed ? Theme.selected : ta.has-hover ? Theme.hover : transparent;
+    Icon {
+        icon: root.icon;
+        color: ta.has-hover ? Theme.text : Theme.dim;
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+export component Btn inherits Rectangle {
+    in property <string> text;
+    in property <bool> primary;
+    in property <bool> danger;
+    callback clicked;
+    height: 32px;
+    min-width: label.preferred-width + 24px;
+    border-radius: 8px * Theme.round;
+    background: root.primary ? (ta.pressed ? Theme.accent.darker(0.2) : ta.has-hover ? Theme.accent.brighter(0.08) : Theme.accent)
+        : root.danger ? (ta.has-hover ? Theme.danger.with-alpha(0.24) : Theme.danger.with-alpha(0.13))
+        : (ta.has-hover ? Theme.hover : Theme.surface-2);
+    border-width: root.primary || root.danger ? 0px : 1px;
+    border-color: Theme.border;
+    label := Text {
+        text: root.text;
+        color: root.primary ? #ffffff : root.danger ? Theme.danger : Theme.text;
+        font-size: 12px * Theme.font-scale;
+        font-weight: 600;
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+export component Toggle inherits Rectangle {
+    in-out property <bool> checked;
+    in property <string> text;
+    callback toggled(bool);
+    height: 30px;
+    min-width: label.preferred-width + 26px;
+    border-radius: 15px * Theme.round;
+    background: root.checked ? Theme.accent.with-alpha(0.16) : ta.has-hover ? Theme.hover : transparent;
+    border-width: 1px;
+    border-color: root.checked ? Theme.accent.with-alpha(0.55) : Theme.border;
+    label := Text {
+        text: root.text;
+        color: root.checked ? Theme.accent : Theme.dim;
+        font-size: 12px * Theme.font-scale;
+        font-weight: 600;
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.checked = !root.checked;
+            root.toggled(root.checked);
+        }
+    }
+}
+
+export component SearchBox inherits Rectangle {
+    in-out property <string> text <=> input.text;
+    callback edited(string);
+    width: 280px;
+    height: 34px;
+    border-radius: 9px * Theme.round;
+    background: Theme.surface-2;
+    border-width: 1px;
+    border-color: input.has-focus ? Theme.accent : Theme.border;
+    Icon {
+        x: 10px;
+        width: 16px;
+        height: 16px;
+        icon: "M 3 10.5 A 7.5 7.5 0 0 1 18 10.5 A 7.5 7.5 0 0 1 3 10.5 Z M 16 16 L 21 21";
+        color: Theme.faint;
+    }
+    if input.text == "": Text {
+        x: 34px;
+        text: "Search name, PID or command   Ctrl+F";
+        color: Theme.faint;
+        font-size: 12.5px * Theme.font-scale;
+    }
+    input := TextInput {
+        x: 34px;
+        width: parent.width - 44px;
+        height: parent.height;
+        vertical-alignment: center;
+        single-line: true;
+        color: Theme.text;
+        font-size: 13px * Theme.font-scale;
+        edited => {
+            root.edited(self.text);
+        }
+    }
+    public function focus-input() {
+        input.focus();
+        input.select-all();
+    }
+    public function clear() {
+        input.text = "";
+        root.edited("");
+    }
+}
+
+export component Tabs inherits Rectangle {
+    in-out property <int> current;
+    in property <[string]> labels;
+    callback changed(int);
+    property <length> tab-w: 120px;
+    width: root.labels.length * root.tab-w + 8px;
+    height: 36px;
+    border-radius: 10px * Theme.round;
+    background: Theme.surface-2;
+    border-width: 1px;
+    border-color: Theme.border;
+    Rectangle {
+        x: 4px + root.current * root.tab-w;
+        y: 4px;
+        width: root.tab-w;
+        height: parent.height - 8px;
+        border-radius: 7px * Theme.round;
+        background: Theme.accent;
+        animate x { duration: 220ms * Theme.anim; easing: ease-out-quart; }
+    }
+    for label[i] in root.labels: Rectangle {
+        x: 4px + i * root.tab-w;
+        width: root.tab-w;
+        height: parent.height;
+        Text {
+            text: label;
+            color: i == root.current ? #ffffff : Theme.dim;
+            font-size: 13px * Theme.font-scale;
+            font-weight: 600;
+        }
+        TouchArea {
+            mouse-cursor: pointer;
+            clicked => {
+                root.current = i;
+                root.changed(i);
+            }
+        }
+    }
+}
+
+/// The Sophon mark: a single glowing particle.
+export component Logo inherits Rectangle {
+    width: 26px;
+    height: 26px;
+    Rectangle {
+        width: 26px;
+        height: 26px;
+        border-radius: 13px * Theme.round;
+        border-width: 1.5px;
+        border-color: Theme.accent.with-alpha(0.45);
+    }
+    Rectangle {
+        width: 14px;
+        height: 14px;
+        border-radius: 7px * Theme.round;
+        background: @radial-gradient(circle, #ffffff 0%, Theme.accent 55%, Theme.accent.with-alpha(0.4) 100%);
+    }
+}

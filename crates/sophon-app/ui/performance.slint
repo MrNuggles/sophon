@@ -1,0 +1,494 @@
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { Series, Graph, Hover, Marker } from "widgets.slint";
+import { Space, SpaceSection } from "space.slint";
+
+export struct Tile {
+    title: string,
+    subtitle: string,
+    a: Series,
+    b: Series,
+    has-b: bool,
+    color-a: color,
+    color-b: color,
+}
+
+export struct Mini {
+    key: string,
+    title: string,
+    value: string,
+    a: Series,
+}
+
+export struct Segment {
+    start: float,
+    frac: float,
+    color: color,
+    label: string,
+    value: string,
+}
+
+export struct Stat {
+    label: string,
+    value: string,
+}
+
+export struct Chart {
+    key: string,
+    markers: [Marker],
+    label: string,
+    scale: string,
+    legend-a: string,
+    legend-b: string,
+    tile: Tile,
+}
+
+export struct PerfDetail {
+    title: string,
+    subtitle: string,
+    main: Chart,
+    has-second: bool,
+    second: Chart,
+    minis-label: string,
+    minis: [Mini],
+    mini-cols: int,
+    mini-color: color,
+    segments-label: string,
+    segments: [Segment],
+    stats: [Stat],
+    note: string,
+}
+
+component RangeChip inherits Rectangle {
+    in property <string> text;
+    in property <bool> active;
+    callback clicked;
+    height: 26px;
+    min-width: chip-label.preferred-width + 22px;
+    border-radius: 13px * Theme.round;
+    background: root.active ? Theme.accent.with-alpha(0.16) : chip-ta.has-hover ? Theme.hover : transparent;
+    border-width: 1px;
+    border-color: root.active ? Theme.accent.with-alpha(0.55) : Theme.border;
+    chip-label := Text {
+        text: root.text;
+        font-size: 11.5px * Theme.font-scale;
+        color: root.active ? Theme.accent : Theme.dim;
+    }
+    chip-ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+component TileView inherits Rectangle {
+    in property <Tile> tile;
+    in property <bool> selected;
+    callback clicked;
+    callback menu(string);
+    height: 62px;
+    border-radius: 10px * Theme.round;
+    background: root.selected ? Theme.selected : ta.has-hover ? Theme.hover : transparent;
+    border-width: root.selected ? 1px : 0px;
+    border-color: Theme.accent.with-alpha(0.45);
+    HorizontalLayout {
+        padding: 8px;
+        spacing: 10px;
+        Graph {
+            width: 74px;
+            a: root.tile.a;
+            b: root.tile.b;
+            has-b: root.tile.has-b;
+            color-a: root.tile.color-a;
+            color-b: root.tile.color-b;
+            show-grid: false;
+            line-width: 1.2px;
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            Text {
+                text: root.tile.title;
+                font-size: 14px * Theme.font-scale;
+                font-weight: 600;
+                color: Theme.text;
+                overflow: elide;
+            }
+            Text {
+                text: root.tile.subtitle;
+                font-size: 11.5px * Theme.font-scale;
+                color: Theme.dim;
+                overflow: elide;
+            }
+        }
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+    ContextMenuArea {
+        Menu {
+            MenuItem {
+                title: "Move up";
+                activated => {
+                    root.menu("up");
+                }
+            }
+            MenuItem {
+                title: "Move down";
+                activated => {
+                    root.menu("down");
+                }
+            }
+            MenuSeparator { }
+            MenuItem {
+                title: "Hide from sidebar";
+                activated => {
+                    root.menu("hide");
+                }
+            }
+            MenuItem {
+                title: "Show all devices";
+                activated => {
+                    root.menu("show-all");
+                }
+            }
+        }
+    }
+}
+
+component Legend inherits HorizontalLayout {
+    in property <string> text;
+    in property <color> color;
+    spacing: 5px;
+    VerticalLayout {
+        alignment: center;
+        Rectangle {
+            width: 9px;
+            height: 9px;
+            border-radius: 3px * Theme.round;
+            background: root.color;
+        }
+    }
+    Text {
+        text: root.text;
+        font-size: 11.5px * Theme.font-scale;
+        color: Theme.dim;
+        vertical-alignment: center;
+    }
+}
+
+component ChartView inherits VerticalLayout {
+    in property <Chart> chart;
+    in property <length> graph-height: 220px;
+    spacing: 6px;
+    HorizontalLayout {
+        spacing: 14px;
+        Text {
+            text: root.chart.label;
+            font-size: 12px * Theme.font-scale;
+            color: Theme.dim;
+            vertical-alignment: center;
+        }
+        Rectangle {
+            horizontal-stretch: 1;
+        }
+        if root.chart.legend-a != "": Legend {
+            text: root.chart.legend-a;
+            color: root.chart.tile.color-a;
+        }
+        if root.chart.legend-b != "": Legend {
+            text: root.chart.legend-b;
+            color: root.chart.tile.color-b;
+        }
+        Text {
+            text: root.chart.scale;
+            font-size: 12px * Theme.font-scale;
+            color: Theme.dim;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+        }
+    }
+    Graph {
+        height: root.graph-height;
+        key: root.chart.key;
+        markers: root.chart.markers;
+        a: root.chart.tile.a;
+        b: root.chart.tile.b;
+        has-b: root.chart.tile.has-b;
+        color-a: root.chart.tile.color-a;
+        color-b: root.chart.tile.color-b;
+        line-width: 1.8px;
+    }
+    HorizontalLayout {
+        Text {
+            text: Hover.start-label;
+            font-size: 10.5px * Theme.font-scale;
+            color: Theme.faint;
+        }
+        Text {
+            text: Hover.end-label;
+            font-size: 10.5px * Theme.font-scale;
+            color: Hover.live ? Theme.faint : Theme.accent;
+            horizontal-alignment: right;
+        }
+    }
+}
+
+component MiniGrid inherits Rectangle {
+    in property <[Mini]> minis;
+    in property <int> cols: 4;
+    in property <color> tint;
+    property <length> gap: 8px;
+    property <length> cell-h: 62px;
+    property <length> cell-w: (self.width - (root.cols - 1) * root.gap) / root.cols;
+    height: Math.ceil(root.minis.length / root.cols) * (root.cell-h + root.gap) - root.gap;
+    for m[i] in root.minis: Rectangle {
+        x: Math.mod(i, root.cols) * (root.cell-w + root.gap);
+        y: Math.floor(i / root.cols) * (root.cell-h + root.gap);
+        width: root.cell-w;
+        height: root.cell-h;
+        Graph {
+            key: m.key;
+            a: m.a;
+            color-a: root.tint;
+            show-grid: false;
+            line-width: 1.2px;
+        }
+        Text {
+            x: 7px;
+            y: 5px;
+            text: m.title;
+            font-size: 10px * Theme.font-scale;
+            color: Theme.dim;
+        }
+        Text {
+            x: parent.width - self.width - 7px;
+            y: 5px;
+            text: m.value;
+            font-size: 10px * Theme.font-scale;
+            font-weight: 600;
+            color: Theme.text;
+        }
+    }
+}
+
+component SegmentBar inherits VerticalLayout {
+    in property <string> label;
+    in property <[Segment]> segments;
+    spacing: 8px;
+    Text {
+        text: root.label;
+        font-size: 12px * Theme.font-scale;
+        color: Theme.dim;
+    }
+    Rectangle {
+        height: 24px;
+        border-radius: 6px * Theme.round;
+        clip: true;
+        background: Theme.surface-2;
+        border-width: 1px;
+        border-color: Theme.border;
+        for s in root.segments: Rectangle {
+            x: parent.width * s.start;
+            width: parent.width * s.frac;
+            background: s.color.with-alpha(0.75);
+        }
+    }
+    HorizontalLayout {
+        spacing: 18px;
+        alignment: start;
+        for s in root.segments: HorizontalLayout {
+            spacing: 6px;
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 10px;
+                    height: 10px;
+                    border-radius: 3px * Theme.round;
+                    background: s.color;
+                }
+            }
+            Text {
+                text: s.label;
+                font-size: 12px * Theme.font-scale;
+                color: Theme.dim;
+            }
+            Text {
+                text: s.value;
+                font-size: 12px * Theme.font-scale;
+                font-weight: 600;
+                color: Theme.text;
+            }
+        }
+    }
+}
+
+component StatGrid inherits Rectangle {
+    in property <[Stat]> stats;
+    in property <int> cols: 4;
+    property <length> gap: 10px;
+    property <length> cell-h: 56px;
+    property <length> cell-w: (self.width - (root.cols - 1) * root.gap) / root.cols;
+    height: Math.ceil(root.stats.length / root.cols) * (root.cell-h + root.gap) - root.gap;
+    for s[i] in root.stats: Rectangle {
+        x: Math.mod(i, root.cols) * (root.cell-w + root.gap);
+        y: Math.floor(i / root.cols) * (root.cell-h + root.gap);
+        width: root.cell-w;
+        height: root.cell-h;
+        border-radius: 9px * Theme.round;
+        background: Theme.surface-2;
+        VerticalLayout {
+            padding-left: 12px;
+            padding-right: 8px;
+            alignment: center;
+            spacing: 2px;
+            Text {
+                text: s.label;
+                font-size: 11px * Theme.font-scale;
+                color: Theme.dim;
+                overflow: elide;
+            }
+            Text {
+                text: s.value;
+                font-size: 16px * Theme.font-scale;
+                font-weight: 600;
+                color: Theme.text;
+                overflow: elide;
+            }
+        }
+    }
+}
+
+export component PerformanceView inherits Rectangle {
+    in property <[Tile]> tiles;
+    in-out property <int> current;
+    in property <PerfDetail> d;
+    in-out property <length> scroll;
+    callback select(int);
+    callback tile-action(int, string);
+
+    HorizontalLayout {
+        Rectangle {
+            width: 270px;
+            background: Theme.surface;
+            Rectangle {
+                x: parent.width - 1px;
+                width: 1px;
+                background: Theme.border;
+            }
+            ScrollView {
+                VerticalLayout {
+                    padding: 10px;
+                    spacing: 4px;
+                    alignment: start;
+                    for t[i] in root.tiles: TileView {
+                        tile: t;
+                        selected: i == root.current;
+                        clicked => {
+                            root.current = i;
+                            root.select(i);
+                        }
+                        menu(a) => {
+                            root.tile-action(i, a);
+                        }
+                    }
+                }
+            }
+        }
+        ScrollView {
+            horizontal-stretch: 1;
+            content-y <=> root.scroll;
+            VerticalLayout {
+                padding: 22px;
+                spacing: 18px;
+                alignment: start;
+                HorizontalLayout {
+                    spacing: 16px;
+                    Text {
+                        text: root.d.title;
+                        font-size: 28px * Theme.font-scale;
+                        font-weight: 700;
+                        color: Theme.text;
+                        vertical-alignment: bottom;
+                    }
+                    Text {
+                        horizontal-stretch: 1;
+                        text: root.d.subtitle;
+                        font-size: 14px * Theme.font-scale;
+                        color: Theme.dim;
+                        horizontal-alignment: right;
+                        vertical-alignment: bottom;
+                        overflow: elide;
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 6px;
+                    alignment: end;
+                    Text {
+                        text: "Hover to inspect · drag to zoom · double-click to reset";
+                        font-size: 11.5px * Theme.font-scale;
+                        color: Theme.faint;
+                        vertical-alignment: center;
+                    }
+                    Rectangle {
+                        width: 8px;
+                    }
+                    if !Hover.live: RangeChip {
+                        text: "● Back to live";
+                        active: true;
+                        clicked => {
+                            Hover.reset();
+                        }
+                    }
+                    for label[i] in Hover.ranges: RangeChip {
+                        text: label;
+                        active: Hover.live && i == Hover.range;
+                        clicked => {
+                            Hover.range = i;
+                            Hover.set-range(i);
+                        }
+                    }
+                }
+                ChartView {
+                    chart: root.d.main;
+                }
+                if root.d.minis.length > 0: VerticalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: root.d.minis-label;
+                        font-size: 12px * Theme.font-scale;
+                        color: Theme.dim;
+                    }
+                    MiniGrid {
+                        minis: root.d.minis;
+                        cols: root.d.mini-cols;
+                        tint: root.d.mini-color;
+                    }
+                }
+                if root.d.segments.length > 0: SegmentBar {
+                    label: root.d.segments-label;
+                    segments: root.d.segments;
+                }
+                if root.d.has-second: ChartView {
+                    chart: root.d.second;
+                    graph-height: 110px;
+                }
+                StatGrid {
+                    stats: root.d.stats;
+                    cols: root.width > 1050px ? 4 : 3;
+                }
+                if root.d.note != "": Text {
+                    text: root.d.note;
+                    font-size: 12px * Theme.font-scale;
+                    color: Theme.dim;
+                    wrap: word-wrap;
+                }
+                if Space.available: SpaceSection { }
+            }
+        }
+    }
+}

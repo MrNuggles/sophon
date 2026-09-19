@@ -1,0 +1,43 @@
+import { Palette } from "std-widgets.slint";
+
+export global Theme {
+    /// 0 = follow system, 1 = light, 2 = dark.
+    in-out property <int> mode: 0;
+    out property <bool> dark: mode == 0 ? Palette.color-scheme != ColorScheme.light : mode == 2;
+
+    out property <color> bg: dark ? #0a0c11 : #f3f4f8;
+    out property <color> surface: dark ? #10131a : #ffffff;
+    out property <color> surface-2: dark ? #161a23 : #f1f3f7;
+    out property <color> hover: dark ? #1b202b : #eceff5;
+    out property <color> selected: dark ? #231e44 : #e9e5ff;
+    out property <color> border: dark ? #1f2430 : #e3e6ee;
+    out property <color> grid: dark ? #ffffff0c : #0000000b;
+    out property <color> graph-bg: dark ? #0c0f15 : #fafbfd;
+    out property <color> text: dark ? #e8ebf2 : #141722;
+    out property <color> dim: dark ? #8d95a6 : #5a6275;
+    out property <color> faint: dark ? #5a6274 : #9aa1b0;
+    /// Accent colour; when not customised it follows the desktop (set from Rust).
+    in property <color> accent-custom;
+    in property <bool> accent-is-custom: false;
+    out property <color> accent: accent-is-custom ? accent-custom : (dark ? #8f7dff : #6b55f6);
+    out property <color> danger: dark ? #ff6b6b : #e5484d;
+    in property <color> heat: #ff9d3c;
+    in property <float> heat-intensity: 1.0;
+
+    in property <color> cpu: #3db4ff;
+    in property <color> mem: #b27bff;
+    in property <color> gpu: #2fd39a;
+    in property <color> disk: #ffb13d;
+    in property <color> net: #ff6fa5;
+
+    // Customisation (see settings.rs).
+    in property <float> font-scale: 1.0;
+    in property <float> round: 1.0;
+    /// Animation speed multiplier: 1 = full, 0.5 = reduced, 0 = off.
+    in property <float> anim: 1.0;
+    in property <length> row-height: 32px;
+    /// 0 = gradient, 1 = filled, 2 = line only, 3 = bars.
+    in property <int> graph-style: 0;
+    in property <float> line-scale: 1.0;
+    in property <bool> graph-grid: true;
+}

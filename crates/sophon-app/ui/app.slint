@@ -1,0 +1,373 @@
+import { Theme } from "theme.slint";
+import { Series, Logo, Tabs, SearchBox, IconButton, Hover, Marker, Btn } from "widgets.slint";
+import { ProcessesView, ProcRow, ProcDetail, Totals, Link, Cols, HeadInfo } from "processes.slint";
+import { PerformanceView, Tile, PerfDetail, Mini, Segment, Stat, Chart } from "performance.slint";
+import { Space, Block, LegendItem } from "space.slint";
+import { SettingsView, SettingsPage, SettingItem } from "settings.slint";
+
+export { Theme, LegendItem, Cols, HeadInfo, SettingsPage, SettingItem, Space, Block, Hover, Marker, Series, ProcRow, ProcDetail, Totals, Link, Tile, PerfDetail, Mini, Segment, Stat, Chart }
+
+/// The system tray icon. Hover shows a live summary; click opens the window.
+export component Tray inherits SystemTrayIcon {
+    in property <image> image;
+    in property <string> summary: "Sophon";
+    icon: root.image;
+    tooltip: root.summary;
+    title: "Sophon";
+    callback open();
+    callback quit();
+    clicked => {
+        root.open();
+    }
+    Menu {
+        MenuItem {
+            title: "Open Sophon";
+            activated => {
+                root.open();
+            }
+        }
+        MenuSeparator { }
+        MenuItem {
+            title: "Quit Sophon";
+            activated => {
+                root.quit();
+            }
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    in property <string> window-title: "Sophon";
+    in property <image> app-icon;
+    title: root.window-title;
+    icon: root.app-icon;
+    preferred-width: 1240px;
+    preferred-height: 800px;
+    min-width: 820px;
+    min-height: 520px;
+    background: Theme.bg;
+
+    in-out property <int> tab: 0;
+    // Processes
+    in property <[ProcRow]> rows;
+    in property <Totals> totals;
+    in property <string> count;
+    in property <int> sort-col: 1;
+    in property <bool> sort-desc: true;
+    in-out property <int> grouping: 0;
+    in property <[HeadInfo]> heads;
+    // A confirmation dialog (ending tasks); empty when hidden.
+    in property <string> confirm-text;
+    in property <string> confirm-button: "End task";
+    in-out property <bool> show-kernel: false;
+    in property <string> selected-key;
+    in property <bool> has-detail;
+    in property <ProcDetail> detail;
+    // Performance
+    in property <[Tile]> tiles;
+    in-out property <int> tile: 0;
+    in property <PerfDetail> perf;
+    in-out property <length> perf-scroll;
+    // Chrome
+    in property <string> status-left;
+    in property <string> status-right;
+    in property <string> toast;
+
+    callback tab-changed(int);
+    callback filter-changed(string);
+    callback sort-by(int);
+    callback select-row(int);
+    callback toggle-row(int);
+    callback activate-row(int);
+    callback row-action(int, string);
+    callback options-changed();
+    callback go(int);
+    callback detail-action(string);
+    callback close-detail();
+    callback tile-changed(int);
+    callback tile-action(int, string);
+    callback delete-pressed(bool);
+    callback column-dropped(int, float);
+    callback column-resized(int, float);
+    callback column-hide(int);
+    callback confirm-accepted();
+    callback confirm-cancelled();
+    callback quit();
+
+    keys := FocusScope {
+        key-pressed(event) => {
+            if (event.modifiers.control && (event.text == "q" || event.text == "Q")) {
+                root.quit();
+                return accept;
+            }
+            if (event.modifiers.control && (event.text == "f" || event.text == "F")) {
+                root.tab = 0;
+                root.tab-changed(0);
+                search.focus-input();
+                return accept;
+            }
+            if (event.text == Key.Escape && root.tab == 1) {
+                Space.select(-1, false);
+                return accept;
+            }
+            if (event.text == Key.Escape) {
+                if (search.text != "") {
+                    search.clear();
+                } else {
+                    root.close-detail();
+                }
+                keys.focus();
+                return accept;
+            }
+            if (event.text == Key.Delete && root.tab == 1 && Space.selected-count > 0) {
+                Space.action(-1, "trash");
+                return accept;
+            }
+            if (event.text == Key.Delete && root.tab == 0) {
+                root.delete-pressed(event.modifiers.shift);
+                return accept;
+            }
+            if (event.modifiers.control && event.text == Key.Tab) {
+                root.tab = Math.mod(root.tab + 1, 3);
+                root.tab-changed(root.tab);
+                return accept;
+            }
+            reject
+        }
+
+        VerticalLayout {
+            // Header
+            Rectangle {
+                height: 58px;
+                background: Theme.surface;
+                Rectangle {
+                    y: parent.height - 1px;
+                    height: 1px;
+                    background: Theme.border;
+                }
+                HorizontalLayout {
+                    padding-left: 18px;
+                    padding-right: 12px;
+                    spacing: 12px;
+                    VerticalLayout {
+                        alignment: center;
+                        Logo { }
+                    }
+                    Text {
+                        text: "Sophon";
+                        font-size: 17px * Theme.font-scale;
+                        font-weight: 700;
+                        color: Theme.text;
+                        vertical-alignment: center;
+                    }
+                    Rectangle {
+                        width: 12px;
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        Tabs {
+                            labels: ["Processes", "Performance", "Settings"];
+                            current <=> root.tab;
+                            changed(i) => {
+                                root.tab-changed(i);
+                            }
+                        }
+                    }
+                    Rectangle {
+                        horizontal-stretch: 1;
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        search := SearchBox {
+                            opacity: root.tab == 0 ? 1 : 0;
+                            edited(text) => {
+                                root.filter-changed(text);
+                            }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        IconButton {
+                            // Half-filled circle: light / dark / system.
+                            icon: Theme.mode == 0 ? "M 3 12 A 9 9 0 0 1 21 12 A 9 9 0 0 1 3 12 Z M 12 3 L 12 21 M 12 7 L 16 7 M 12 11 L 19 11 M 12 15 L 18 15"
+                                : Theme.mode == 1 ? "M 7 12 A 5 5 0 0 1 17 12 A 5 5 0 0 1 7 12 Z M 12 1 L 12 3 M 12 21 L 12 23 M 1 12 L 3 12 M 21 12 L 23 12 M 4.2 4.2 L 5.6 5.6 M 18.4 18.4 L 19.8 19.8 M 4.2 19.8 L 5.6 18.4 M 18.4 5.6 L 19.8 4.2"
+                                : "M 20 14.5 A 8.5 8.5 0 1 1 9.5 4 A 6.5 6.5 0 0 0 20 14.5 Z";
+                            clicked => {
+                                Theme.mode = Math.mod(Theme.mode + 1, 3);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if root.tab == 0: ProcessesView {
+                vertical-stretch: 1;
+                rows: root.rows;
+                totals: root.totals;
+                count: root.count;
+                sort-col: root.sort-col;
+                sort-desc: root.sort-desc;
+                grouping <=> root.grouping;
+                heads: root.heads;
+                column-dropped(c, f) => {
+                    root.column-dropped(c, f);
+                }
+                column-resized(c, w) => {
+                    root.column-resized(c, w);
+                }
+                column-hide(c) => {
+                    root.column-hide(c);
+                }
+                show-kernel <=> root.show-kernel;
+                selected-key: root.selected-key;
+                has-detail: root.has-detail;
+                detail: root.detail;
+                sort-by(c) => {
+                    root.sort-by(c);
+                }
+                select-row(i) => {
+                    root.select-row(i);
+                }
+                toggle-row(i) => {
+                    root.toggle-row(i);
+                }
+                activate-row(i) => {
+                    root.activate-row(i);
+                }
+                row-action(i, a) => {
+                    root.row-action(i, a);
+                }
+                options-changed => {
+                    root.options-changed();
+                }
+                go(pid) => {
+                    root.go(pid);
+                }
+                detail-action(a) => {
+                    root.detail-action(a);
+                }
+                close-detail => {
+                    root.close-detail();
+                }
+                focus-table => {
+                    keys.focus();
+                }
+            }
+            if root.tab == 2: SettingsView {
+                vertical-stretch: 1;
+            }
+            if root.tab == 1: PerformanceView {
+                vertical-stretch: 1;
+                tiles: root.tiles;
+                current <=> root.tile;
+                d: root.perf;
+                scroll <=> root.perf-scroll;
+                select(i) => {
+                    root.tile-changed(i);
+                }
+                tile-action(i, a) => {
+                    root.tile-action(i, a);
+                }
+            }
+
+            // Status bar
+            Rectangle {
+                height: 28px;
+                background: Theme.surface;
+                Rectangle {
+                    y: 0;
+                    height: 1px;
+                    background: Theme.border;
+                }
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 16px;
+                    spacing: 8px;
+                    Text {
+                        text: root.status-left;
+                        font-size: 11.5px * Theme.font-scale;
+                        color: Theme.dim;
+                        vertical-alignment: center;
+                    }
+                    Rectangle {
+                        horizontal-stretch: 1;
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 7px;
+                            height: 7px;
+                            border-radius: 3.5px * Theme.round;
+                            background: Theme.gpu;
+                        }
+                    }
+                    Text {
+                        text: root.status-right;
+                        font-size: 11.5px * Theme.font-scale;
+                        color: Theme.dim;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+
+        if root.confirm-text != "": Rectangle {
+            background: #00000077;
+            TouchArea { }
+            Rectangle {
+                width: min(parent.width - 60px, 440px);
+                height: confirm-body.preferred-height + 100px;
+                border-radius: 12px * Theme.round;
+                background: Theme.surface;
+                border-width: 1px;
+                border-color: Theme.border;
+                drop-shadow-blur: 24px;
+                drop-shadow-color: #00000066;
+                VerticalLayout {
+                    padding: 22px;
+                    spacing: 18px;
+                    confirm-body := Text {
+                        text: root.confirm-text;
+                        wrap: word-wrap;
+                        font-size: 13.5px * Theme.font-scale;
+                        color: Theme.text;
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        alignment: end;
+                        Btn {
+                            text: "Cancel";
+                            clicked => {
+                                root.confirm-cancelled();
+                            }
+                        }
+                        Btn {
+                            text: root.confirm-button;
+                            danger: true;
+                            clicked => {
+                                root.confirm-accepted();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if root.toast != "": Rectangle {
+            y: parent.height - 84px;
+            height: 38px;
+            width: toast-text.preferred-width + 36px;
+            border-radius: 19px * Theme.round;
+            background: Theme.dark ? #2b3040 : #1f2330;
+            toast-text := Text {
+                text: root.toast;
+                color: #ffffff;
+                font-size: 12.5px * Theme.font-scale;
+            }
+        }
+    }
+
+    init => {
+        keys.focus();
+    }
+}

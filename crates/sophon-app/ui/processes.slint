@@ -1,0 +1,935 @@
+import { ListView, ScrollView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { Series, Graph, Avatar, Icon, Btn, Toggle } from "widgets.slint";
+
+export struct ProcRow {
+    /// 0 = section header, 1 = app group, 2 = process.
+    kind: int,
+    depth: int,
+    expanded: bool,
+    key: string,
+    pid: int,
+    name: string,
+    sub: string,
+    avatar: string,
+    tint: color,
+    cpu: string,
+    cpu-heat: float,
+    mem: string,
+    mem-heat: float,
+    gpu: string,
+    gpu-heat: float,
+    gmem: string,
+    gmem-heat: float,
+    down: string,
+    down-heat: float,
+    up: string,
+    up-heat: float,
+    pid-text: string,
+    user: string,
+    spark: Series,
+}
+
+export struct Link {
+    pid: int,
+    name: string,
+    sub: string,
+    avatar: string,
+    tint: color,
+}
+
+export struct ProcDetail {
+    pid: int,
+    title: string,
+    subtitle: string,
+    avatar: string,
+    tint: color,
+    state: string,
+    threads: string,
+    user: string,
+    cpu: string,
+    mem: string,
+    rss: string,
+    gpu: string,
+    gmem: string,
+    net: string,
+    started: string,
+    exe: string,
+    cmdline: string,
+    unit: string,
+    group: string,
+    cpu-series: Series,
+    cpu-peak: string,
+    has-parent: bool,
+    parent: Link,
+    children-label: string,
+    children: [Link],
+}
+
+export struct Totals {
+    cpu: string,
+    cpu-heat: float,
+    mem: string,
+    mem-heat: float,
+    gpu: string,
+    gpu-heat: float,
+    gmem: string,
+    gmem-heat: float,
+    down: string,
+    down-heat: float,
+    up: string,
+    up-heat: float,
+}
+
+/// Column geometry, set from Rust (settings: order, visibility, widths).
+/// Indexed by column id: 0 activity, 1 cpu, 2 memory, 3 gpu, 4 gpu memory,
+/// 5 down, 6 up, 7 pid, 8 user. `r` is the distance from the table's right
+/// edge (inside the scrollbar gutter) to the column's left side.
+export global Cols {
+    in property <[length]> w: [64px, 68px, 90px, 62px, 86px, 80px, 80px, 64px, 80px];
+    in property <[length]> r: [674px, 610px, 542px, 452px, 390px, 304px, 224px, 144px, 80px];
+    in property <length> total: 674px;
+    out property <length> gutter: 14px;
+}
+
+export struct HeadInfo {
+    col: int,
+    label: string,
+    total: string,
+    heat: float,
+    hint: string,
+    /// Sort key for this column, or -1 if it can't be sorted.
+    sort: int,
+    r: length,
+    w: length,
+}
+
+component HeadCell inherits Rectangle {
+    in property <string> label;
+    in property <string> total;
+    in property <float> heat;
+    in property <bool> active;
+    in property <bool> desc;
+    /// Explanation shown after hovering for a moment.
+    in property <string> hint;
+    callback clicked;
+    /// Dropped after dragging; the argument is the drop x in the header.
+    callback dropped(length);
+    callback resized(length);
+    callback hovered(bool);
+    property <length> press-x;
+    property <length> drag-dx;
+    property <bool> pressing;
+    property <bool> dragging;
+    property <length> resize-dx;
+    property <bool> resizing;
+    Timer {
+        interval: 650ms;
+        running: ta.has-hover && root.hint != "";
+        triggered => {
+            tip.show();
+        }
+    }
+    tip := PopupWindow {
+        x: min(0px, root.width - 260px);
+        y: root.height + 4px;
+        width: 260px;
+        close-policy: close-on-click-outside;
+        Rectangle {
+            border-radius: 8px * Theme.round;
+            background: Theme.dark ? #262b38 : #1f2330;
+            drop-shadow-blur: 10px;
+            drop-shadow-color: #00000055;
+            height: tip-text.preferred-height + 16px;
+            tip-text := Text {
+                x: 10px;
+                width: parent.width - 20px;
+                text: root.hint;
+                wrap: word-wrap;
+                color: #ffffff;
+                font-size: 11.5px * Theme.font-scale;
+            }
+        }
+    }
+    background: root.dragging ? Theme.selected : ta.has-hover ? Theme.hover : Theme.heat.with-alpha(root.heat * 0.22 * Theme.heat-intensity);
+    z: root.dragging ? 2 : 0;
+    VerticalLayout {
+        x: root.dragging ? root.drag-dx : 0;
+        padding-right: 10px;
+        alignment: center;
+        spacing: 1px;
+        Text {
+            text: root.total;
+            font-size: 15px * Theme.font-scale;
+            font-weight: 600;
+            color: Theme.text;
+            horizontal-alignment: right;
+        }
+        Text {
+            text: root.label + (root.active ? (root.desc ? " ↓" : " ↑") : "");
+            font-size: 11px * Theme.font-scale;
+            color: root.active ? Theme.accent : Theme.dim;
+            horizontal-alignment: right;
+        }
+    }
+    ta := TouchArea {
+        mouse-cursor: root.dragging ? MouseCursor.grabbing : MouseCursor.pointer;
+        changed has-hover => {
+            root.hovered(self.has-hover);
+            if (!self.has-hover) {
+                tip.close();
+            }
+        }
+        pointer-event(event) => {
+            if (event.button != PointerEventButton.left) {
+                return;
+            }
+            if (event.kind == PointerEventKind.down) {
+                root.press-x = self.mouse-x;
+                root.pressing = true;
+                tip.close();
+            }
+            if (event.kind == PointerEventKind.up && root.pressing) {
+                root.pressing = false;
+                if (root.dragging) {
+                    root.dragging = false;
+                    root.dropped(root.x + self.mouse-x);
+                } else {
+                    root.clicked();
+                }
+                root.drag-dx = 0;
+            }
+        }
+        moved => {
+            root.drag-dx = self.mouse-x - root.press-x;
+            if (abs(root.drag-dx) > 6px) {
+                root.dragging = true;
+            }
+        }
+    }
+    // Drag the left edge to resize (numbers are right-aligned, so the column grows leftwards).
+    Rectangle {
+        x: root.resizing ? root.resize-dx : 0;
+        width: 6px;
+        background: edge-ta.has-hover || root.resizing ? Theme.accent.with-alpha(0.6) : transparent;
+        edge-ta := TouchArea {
+            mouse-cursor: MouseCursor.col-resize;
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down) {
+                    root.resizing = true;
+                    root.resize-dx = 0;
+                }
+                if (event.kind == PointerEventKind.up && root.resizing) {
+                    root.resizing = false;
+                    root.resized(root.width - root.resize-dx);
+                    root.resize-dx = 0;
+                }
+            }
+            moved => {
+                root.resize-dx = self.mouse-x - 3px;
+            }
+        }
+    }
+}
+
+component Cell inherits Rectangle {
+    in property <string> text;
+    in property <float> heat;
+    background: Theme.heat.with-alpha(root.heat * (Theme.dark ? 0.36 : 0.42) * Theme.heat-intensity);
+    Text {
+        x: 0;
+        width: parent.width - 10px;
+        height: parent.height;
+        text: root.text;
+        horizontal-alignment: right;
+        vertical-alignment: center;
+        color: Theme.text;
+        font-size: 12px * Theme.font-scale;
+    }
+}
+
+component RowView inherits Rectangle {
+    in property <ProcRow> item;
+    in property <bool> selected;
+    callback select();
+    callback toggle();
+    callback activate();
+    callback action(string);
+    height: Theme.row-height;
+    background: root.item.kind == 0 ? transparent : root.selected ? Theme.selected : ta.has-hover ? Theme.hover : transparent;
+
+    ta := TouchArea {
+        mouse-cursor: root.item.kind == 0 ? MouseCursor.pointer : MouseCursor.default;
+        clicked => {
+            root.select();
+        }
+        double-clicked => {
+            if (root.item.kind == 0) {
+                root.toggle();
+            } else {
+                root.activate();
+            }
+        }
+    }
+
+    if root.item.kind == 0: Rectangle {
+        background: ta.has-hover ? Theme.hover : transparent;
+        Icon {
+            x: 10px;
+            y: parent.height - self.height - 6px;
+            width: 13px;
+            height: 13px;
+            icon: root.item.expanded ? "M 6 9 L 12 15 L 18 9" : "M 9 6 L 15 12 L 9 18";
+            color: Theme.accent;
+        }
+        Text {
+            x: 28px;
+            y: 0;
+            height: parent.height - 5px;
+            text: root.item.name;
+            font-size: 11.5px * Theme.font-scale;
+            font-weight: 700;
+            color: Theme.accent;
+            vertical-alignment: bottom;
+        }
+    }
+
+    if root.item.kind != 0: ContextMenuArea {
+        Menu {
+            MenuItem {
+                title: "End task";
+                activated => {
+                    root.action("end");
+                }
+            }
+            MenuItem {
+                title: "End process tree";
+                activated => {
+                    root.action("tree");
+                }
+            }
+            MenuItem {
+                title: "Force kill";
+                activated => {
+                    root.action("kill");
+                }
+            }
+            MenuSeparator { }
+            MenuItem {
+                title: "Open file location";
+                activated => {
+                    root.action("open");
+                }
+            }
+            MenuItem {
+                title: "Go to parent";
+                activated => {
+                    root.action("parent");
+                }
+            }
+        }
+        Rectangle {
+            HorizontalLayout {
+                x: 0;
+                width: max(0px, parent.width - Cols.gutter - Cols.total);
+                padding-left: 6px + root.item.depth * 20px;
+                spacing: 8px;
+                Rectangle {
+                    width: 16px;
+                    if root.item.kind == 1: Icon {
+                        width: 14px;
+                        height: 14px;
+                        icon: root.item.expanded ? "M 6 9 L 12 15 L 18 9" : "M 9 6 L 15 12 L 9 18";
+                        color: Theme.dim;
+                    }
+                    TouchArea {
+                        enabled: root.item.kind == 1;
+                        mouse-cursor: pointer;
+                        clicked => {
+                            root.toggle();
+                        }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Avatar {
+                        letter: root.item.avatar;
+                        tint: root.item.tint;
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Text {
+                        text: root.item.name;
+                        overflow: elide;
+                        font-size: 13px * Theme.font-scale;
+                        font-weight: root.item.kind == 1 ? 600 : 400;
+                        color: Theme.text;
+                    }
+                    if root.item.sub != "": Text {
+                        text: root.item.sub;
+                        overflow: elide;
+                        font-size: 10.5px * Theme.font-scale;
+                        color: Theme.faint;
+                    }
+                }
+            }
+            if Cols.w[0] > 0: Rectangle {
+                x: parent.width - Cols.gutter - Cols.r[0];
+                width: Cols.w[0];
+                Path {
+                    width: parent.width - 16px;
+                    height: 16px;
+                    viewbox-width: 1000;
+                    viewbox-height: 1000;
+                    fit: fill;
+                    commands: root.item.spark.area;
+                    stroke-width: 0px;
+                    fill: Theme.cpu.with-alpha(0.25);
+                }
+                Path {
+                    width: parent.width - 16px;
+                    height: 16px;
+                    viewbox-width: 1000;
+                    viewbox-height: 1000;
+                    fit: fill;
+                    commands: root.item.spark.line;
+                    stroke: Theme.cpu;
+                    stroke-width: 1px;
+                }
+            }
+            if Cols.w[1] > 0: Cell {
+                x: parent.width - Cols.gutter - Cols.r[1];
+                width: Cols.w[1];
+                text: root.item.cpu;
+                heat: root.item.cpu-heat;
+            }
+            if Cols.w[2] > 0: Cell {
+                x: parent.width - Cols.gutter - Cols.r[2];
+                width: Cols.w[2];
+                text: root.item.mem;
+                heat: root.item.mem-heat;
+            }
+            if Cols.w[3] > 0: Cell {
+                x: parent.width - Cols.gutter - Cols.r[3];
+                width: Cols.w[3];
+                text: root.item.gpu;
+                heat: root.item.gpu-heat;
+            }
+            if Cols.w[4] > 0: Cell {
+                x: parent.width - Cols.gutter - Cols.r[4];
+                width: Cols.w[4];
+                text: root.item.gmem;
+                heat: root.item.gmem-heat;
+            }
+            if Cols.w[5] > 0: Cell {
+                x: parent.width - Cols.gutter - Cols.r[5];
+                width: Cols.w[5];
+                text: root.item.down;
+                heat: root.item.down-heat;
+            }
+            if Cols.w[6] > 0: Cell {
+                x: parent.width - Cols.gutter - Cols.r[6];
+                width: Cols.w[6];
+                text: root.item.up;
+                heat: root.item.up-heat;
+            }
+            if Cols.w[7] > 0: Cell {
+                x: parent.width - Cols.gutter - Cols.r[7];
+                width: Cols.w[7];
+                text: root.item.pid-text;
+            }
+            if Cols.w[8] > 0: Text {
+                x: parent.width - Cols.gutter - Cols.r[8];
+                width: Cols.w[8] - 6px;
+                text: root.item.user;
+                overflow: elide;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+                color: Theme.dim;
+                font-size: 12px * Theme.font-scale;
+            }
+        }
+    }
+}
+
+component Section inherits VerticalLayout {
+    in property <string> title;
+    spacing: 6px;
+    Text {
+        text: root.title;
+        font-size: 11px * Theme.font-scale;
+        font-weight: 700;
+        color: Theme.faint;
+    }
+    @children
+}
+
+component LinkRow inherits Rectangle {
+    in property <Link> link;
+    callback clicked;
+    height: 38px;
+    border-radius: 8px * Theme.round;
+    background: ta.has-hover ? Theme.hover : Theme.surface-2;
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 8px;
+        VerticalLayout {
+            alignment: center;
+            Avatar {
+                letter: root.link.avatar;
+                tint: root.link.tint;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            Text {
+                text: root.link.name;
+                font-size: 12.5px * Theme.font-scale;
+                color: Theme.text;
+                overflow: elide;
+            }
+            Text {
+                text: root.link.sub;
+                font-size: 10.5px * Theme.font-scale;
+                color: Theme.faint;
+                overflow: elide;
+            }
+        }
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+component Fact inherits VerticalLayout {
+    in property <string> label;
+    in property <string> value;
+    spacing: 1px;
+    Text {
+        text: root.label;
+        font-size: 10.5px * Theme.font-scale;
+        color: Theme.dim;
+    }
+    Text {
+        text: root.value;
+        font-size: 14px * Theme.font-scale;
+        font-weight: 600;
+        color: Theme.text;
+        overflow: elide;
+    }
+}
+
+component Selectable inherits TextInput {
+    read-only: true;
+    wrap: char-wrap;
+    single-line: false;
+    font-size: 11.5px * Theme.font-scale;
+    color: Theme.text;
+}
+
+component DetailPane inherits Rectangle {
+    in property <ProcDetail> d;
+    callback close();
+    callback go(int);
+    callback act(string);
+    background: Theme.surface;
+    Rectangle {
+        x: 0;
+        width: 1px;
+        background: Theme.border;
+    }
+    ScrollView {
+        VerticalLayout {
+            width: root.width - 14px;
+            padding: 18px;
+            spacing: 16px;
+            alignment: start;
+            HorizontalLayout {
+                spacing: 12px;
+                VerticalLayout {
+                    alignment: center;
+                    Avatar {
+                        size: 42px;
+                        letter: root.d.avatar;
+                        tint: root.d.tint;
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 2px;
+                    Text {
+                        text: root.d.title;
+                        font-size: 18px * Theme.font-scale;
+                        font-weight: 700;
+                        color: Theme.text;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: root.d.subtitle;
+                        font-size: 12px * Theme.font-scale;
+                        color: Theme.dim;
+                        overflow: elide;
+                    }
+                }
+                VerticalLayout {
+                    alignment: start;
+                    Rectangle {
+                        width: 28px;
+                        height: 28px;
+                        border-radius: 7px * Theme.round;
+                        background: close-ta.has-hover ? Theme.hover : transparent;
+                        Icon {
+                            width: 16px;
+                            height: 16px;
+                            icon: "M 6 6 L 18 18 M 18 6 L 6 18";
+                        }
+                        close-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                root.close();
+                            }
+                        }
+                    }
+                }
+            }
+            GridLayout {
+                spacing: 8px;
+                Row {
+                    Btn {
+                        text: "End task";
+                        primary: true;
+                        clicked => {
+                            root.act("end");
+                        }
+                    }
+                    Btn {
+                        text: "End process tree";
+                        clicked => {
+                            root.act("tree");
+                        }
+                    }
+                }
+                Row {
+                    Btn {
+                        text: "Force kill";
+                        danger: true;
+                        clicked => {
+                            root.act("kill");
+                        }
+                    }
+                    Btn {
+                        text: "Open file location";
+                        clicked => {
+                            root.act("open");
+                        }
+                    }
+                }
+            }
+            VerticalLayout {
+                spacing: 6px;
+                HorizontalLayout {
+                    Text {
+                        text: "CPU · last 30 seconds · peak " + root.d.cpu-peak;
+                        font-size: 11px * Theme.font-scale;
+                        color: Theme.dim;
+                    }
+                    Text {
+                        text: root.d.cpu;
+                        font-size: 11px * Theme.font-scale;
+                        color: Theme.text;
+                        horizontal-alignment: right;
+                    }
+                }
+                Graph {
+                    height: 70px;
+                    a: root.d.cpu-series;
+                    color-a: Theme.cpu;
+                }
+            }
+            GridLayout {
+                spacing: 12px;
+                Row {
+                    Fact {
+                        label: "CPU";
+                        value: root.d.cpu;
+                    }
+                    Fact {
+                        label: "Memory (private)";
+                        value: root.d.mem;
+                    }
+                    Fact {
+                        label: "Resident";
+                        value: root.d.rss;
+                    }
+                }
+                Row {
+                    Fact {
+                        label: "GPU";
+                        value: root.d.gpu;
+                    }
+                    Fact {
+                        label: "GPU memory";
+                        value: root.d.gmem;
+                    }
+                    Fact {
+                        label: "Threads";
+                        value: root.d.threads;
+                    }
+                }
+                Row {
+                    Fact {
+                        colspan: 3;
+                        label: "Network (TCP)";
+                        value: root.d.net;
+                    }
+                }
+                Row {
+                    Fact {
+                        label: "Status";
+                        value: root.d.state;
+                    }
+                    Fact {
+                        label: "User";
+                        value: root.d.user;
+                    }
+                    Fact {
+                        label: "Started";
+                        value: root.d.started;
+                    }
+                }
+            }
+            if root.d.has-parent: Section {
+                title: "PARENT";
+                LinkRow {
+                    link: root.d.parent;
+                    clicked => {
+                        root.go(root.d.parent.pid);
+                    }
+                }
+            }
+            if root.d.children.length > 0: Section {
+                title: root.d.children-label;
+                for child in root.d.children: LinkRow {
+                    link: child;
+                    clicked => {
+                        root.go(child.pid);
+                    }
+                }
+            }
+            Section {
+                title: "APP / UNIT";
+                Selectable {
+                    text: root.d.group + "   ·   " + root.d.unit;
+                }
+            }
+            if root.d.exe != "": Section {
+                title: "EXECUTABLE";
+                Selectable {
+                    text: root.d.exe;
+                }
+            }
+            if root.d.cmdline != "": Section {
+                title: "COMMAND LINE";
+                Selectable {
+                    text: root.d.cmdline;
+                }
+            }
+        }
+    }
+}
+
+export component ProcessesView inherits Rectangle {
+    in property <[ProcRow]> rows;
+    in property <Totals> totals;
+    in property <string> count;
+    in property <int> sort-col;
+    in property <bool> sort-desc;
+    in-out property <int> grouping;
+    in-out property <bool> show-kernel;
+    in property <[HeadInfo]> heads;
+    property <int> header-hover: -1;
+    in property <string> selected-key;
+    in property <bool> has-detail;
+    in property <ProcDetail> detail;
+    callback sort-by(int);
+    callback select-row(int);
+    callback toggle-row(int);
+    callback activate-row(int);
+    callback row-action(int, string);
+    callback options-changed();
+    callback go(int);
+    callback detail-action(string);
+    callback close-detail();
+    callback focus-table();
+    /// Column `col` dropped at a fraction of the header width.
+    callback column-dropped(int, float);
+    callback column-resized(int, float);
+    /// Hide column `col`; -1 shows all, -2 resets order and widths.
+    callback column-hide(int);
+
+    HorizontalLayout {
+        VerticalLayout {
+            horizontal-stretch: 1;
+            // Toolbar
+            HorizontalLayout {
+                padding-left: 18px;
+                padding-right: 14px;
+                padding-top: 12px;
+                padding-bottom: 8px;
+                spacing: 10px;
+                Text {
+                    text: "Processes";
+                    font-size: 20px * Theme.font-scale;
+                    font-weight: 700;
+                    color: Theme.text;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: root.count;
+                    font-size: 12px * Theme.font-scale;
+                    color: Theme.dim;
+                    vertical-alignment: center;
+                }
+                Rectangle {
+                    horizontal-stretch: 1;
+                }
+                for g[i] in ["By app", "Tree", "Flat"]: VerticalLayout {
+                    alignment: center;
+                    Toggle {
+                        text: g;
+                        checked: root.grouping == i;
+                        toggled => {
+                            root.grouping = i;
+                            root.options-changed();
+                        }
+                    }
+                }
+                Rectangle {
+                    width: 6px;
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Toggle {
+                        text: "Kernel threads";
+                        checked <=> root.show-kernel;
+                        toggled => {
+                            root.options-changed();
+                        }
+                    }
+                }
+            }
+            // Column headers: drag to reorder, drag the left edge to resize, right-click for more.
+            header := Rectangle {
+                height: 50px;
+                Rectangle {
+                    y: parent.height - 1px;
+                    height: 1px;
+                    background: Theme.border;
+                }
+                Rectangle {
+                    x: 0;
+                    width: max(0px, parent.width - Cols.gutter - Cols.total);
+                    background: name-ta.has-hover ? Theme.hover : transparent;
+                    Text {
+                        x: 16px;
+                        text: "Name" + (root.sort-col == 0 ? (root.sort-desc ? " ↓" : " ↑") : "");
+                        font-size: 11px * Theme.font-scale;
+                        color: root.sort-col == 0 ? Theme.accent : Theme.dim;
+                        y: parent.height - self.height - 9px;
+                    }
+                    name-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            root.sort-by(0);
+                        }
+                    }
+                }
+                for h in root.heads: HeadCell {
+                    x: parent.width - Cols.gutter - h.r;
+                    width: h.w;
+                    label: h.label;
+                    total: h.total;
+                    heat: h.heat;
+                    hint: h.hint;
+                    active: h.sort >= 0 && root.sort-col == h.sort;
+                    desc: root.sort-desc;
+                    clicked => {
+                        if (h.sort >= 0) {
+                            root.sort-by(h.sort);
+                        }
+                    }
+                    dropped(x) => {
+                        root.column-dropped(h.col, x / header.width);
+                    }
+                    resized(w) => {
+                        root.column-resized(h.col, w / 1px);
+                    }
+                    hovered(on) => {
+                        if (on) {
+                            root.header-hover = h.col;
+                        }
+                    }
+                }
+                ContextMenuArea {
+                    Menu {
+                        MenuItem {
+                            title: "Hide this column";
+                            activated => {
+                                root.column-hide(root.header-hover);
+                            }
+                        }
+                        MenuItem {
+                            title: "Show all columns";
+                            activated => {
+                                root.column-hide(-1);
+                            }
+                        }
+                        MenuItem {
+                            title: "Reset columns";
+                            activated => {
+                                root.column-hide(-2);
+                            }
+                        }
+                    }
+                }
+            }
+            ListView {
+                for row[i] in root.rows: RowView {
+                    item: row;
+                    selected: row.key == root.selected-key;
+                    select => {
+                        root.select-row(i);
+                        root.focus-table();
+                    }
+                    toggle => {
+                        root.toggle-row(i);
+                    }
+                    activate => {
+                        root.activate-row(i);
+                    }
+                    action(a) => {
+                        root.row-action(i, a);
+                    }
+                }
+            }
+        }
+        if root.has-detail: DetailPane {
+            width: 360px;
+            d: root.detail;
+            close => {
+                root.close-detail();
+            }
+            go(pid) => {
+                root.go(pid);
+            }
+            act(a) => {
+                root.detail-action(a);
+            }
+        }
+    }
+}

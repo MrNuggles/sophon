@@ -1,0 +1,437 @@
+import { Theme } from "theme.slint";
+import { Btn, Icon } from "widgets.slint";
+
+export struct LegendItem {
+    color: color,
+    label: string,
+}
+
+export struct Block {
+    x: length,
+    y: length,
+    w: length,
+    h: length,
+    color: color,
+    label: string,
+    detail: string,
+    tip: string,
+    /// A folder whose contents are drawn inside it (label sits in a header strip).
+    header: bool,
+    selected: bool,
+}
+
+/// State and callbacks for the disk space map, driven from Rust.
+export global Space {
+    in property <bool> available;
+    in property <[string]> mounts;
+    in-out property <int> mount;
+    /// 0 = not scanned, 1 = scanning, 2 = showing results.
+    in property <int> state;
+    in property <string> intro;
+    in property <string> progress;
+    in property <string> summary;
+    in property <[string]> crumbs;
+    in property <[Block]> blocks;
+    in property <string> confirm;
+    in property <int> selected-count;
+    in property <[LegendItem]> legend;
+    callback scan();
+    callback cancel();
+    callback select-mount(int);
+    callback zoom(int);
+    /// Select block `index` (-1 clears); `add` toggles it in the existing selection (Shift).
+    callback select(int, bool);
+    callback crumb(int);
+    callback action(int, string);
+    callback resized(length, length);
+    callback confirm-trash();
+    callback cancel-trash();
+}
+
+component Chip inherits Rectangle {
+    in property <string> text;
+    in property <bool> active;
+    callback clicked;
+    height: 28px;
+    min-width: label.preferred-width + 24px;
+    border-radius: 14px * Theme.round;
+    background: root.active ? Theme.accent.with-alpha(0.16) : ta.has-hover ? Theme.hover : transparent;
+    border-width: 1px;
+    border-color: root.active ? Theme.accent.with-alpha(0.55) : Theme.border;
+    label := Text {
+        text: root.text;
+        font-size: 12px * Theme.font-scale;
+        color: root.active ? Theme.accent : Theme.dim;
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+component TreeMap inherits Rectangle {
+    in property <[Block]> blocks;
+    property <int> hover: -1;
+    /// Last block hovered; the context menu acts on it (hover is lost when the menu opens).
+    property <int> target: -1;
+    property <bool> tip-show;
+    property <length> mx;
+    property <length> my;
+    background: Theme.graph-bg;
+    border-radius: 8px * Theme.round;
+    border-width: 1px;
+    border-color: Theme.border;
+    clip: true;
+
+    changed width => {
+        Space.resized(self.width, self.height);
+    }
+    changed height => {
+        Space.resized(self.width, self.height);
+    }
+    init => {
+        Space.resized(self.width, self.height);
+    }
+
+    // Clicking empty space clears the selection.
+    TouchArea {
+        clicked => {
+            Space.select(-1, false);
+        }
+    }
+
+    for b[i] in root.blocks: Rectangle {
+        x: b.x;
+        y: b.y;
+        width: b.w;
+        height: b.h;
+        background: b.color;
+        border-radius: 3px * Theme.round;
+        border-width: 1px;
+        border-color: Theme.graph-bg.with-alpha(0.7);
+        if b.selected: Rectangle {
+            border-radius: 3px * Theme.round;
+            background: Theme.accent.with-alpha(0.22);
+            border-width: 2px;
+            border-color: Theme.accent;
+        }
+        glow := Rectangle {
+            border-radius: 3px * Theme.round;
+            background: Theme.dark ? #ffffff : #000000;
+            border-width: 2px;
+            border-color: Theme.accent;
+            opacity: 0;
+        }
+        if b.w > 44px && b.h > 15px: Text {
+            x: 5px;
+            y: 2px;
+            width: parent.width - 10px;
+            text: b.label;
+            font-size: 11px * Theme.font-scale;
+            font-weight: b.header ? 600 : 400;
+            color: Theme.text;
+            overflow: elide;
+        }
+        if !b.header && b.w > 44px && b.h > 30px: Text {
+            x: 5px;
+            y: 16px;
+            width: parent.width - 10px;
+            text: b.detail;
+            font-size: 10px * Theme.font-scale;
+            color: Theme.dim;
+            overflow: elide;
+        }
+        ta := TouchArea {
+            mouse-cursor: pointer;
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.up && event.button == PointerEventButton.left) {
+                    Space.select(i, event.modifiers.shift);
+                }
+            }
+            double-clicked => {
+                Space.zoom(i);
+            }
+            changed has-hover => {
+                if (self.has-hover) {
+                    root.hover = i;
+                    root.target = i;
+                    root.tip-show = false;
+                } else if (root.hover == i) {
+                    root.hover = -1;
+                    root.tip-show = false;
+                }
+            }
+            changed mouse-x => {
+                if (self.has-hover) {
+                    root.mx = b.x + self.mouse-x;
+                }
+            }
+            changed mouse-y => {
+                if (self.has-hover) {
+                    root.my = b.y + self.mouse-y;
+                }
+            }
+        }
+        states [
+            hot when ta.has-hover: {
+                glow.opacity: 0.16;
+                in {
+                    animate glow.opacity { duration: 80ms * Theme.anim; }
+                }
+                out {
+                    animate glow.opacity { duration: 500ms * Theme.anim; easing: ease-out; }
+                }
+            }
+        ]
+    }
+
+    // On top of the blocks: takes right-clicks only; hover and left clicks pass through.
+    ContextMenuArea {
+        Menu {
+            MenuItem {
+                title: "Open";
+                activated => {
+                    Space.action(root.target, "open");
+                }
+            }
+            MenuItem {
+                title: "Show in file manager";
+                activated => {
+                    Space.action(root.target, "reveal");
+                }
+            }
+            MenuItem {
+                title: "Zoom in";
+                activated => {
+                    Space.action(root.target, "zoom");
+                }
+            }
+            MenuSeparator { }
+            MenuItem {
+                title: root.target >= 0 && root.target < root.blocks.length && root.blocks[root.target].selected && Space.selected-count > 1
+                    ? "Move " + Space.selected-count + " selected items to Trash…" : "Move to Trash…";
+                activated => {
+                    Space.action(root.target, "trash");
+                }
+            }
+        }
+    }
+
+    Timer {
+        interval: 650ms;
+        running: root.hover >= 0 && !root.tip-show;
+        triggered => {
+            root.tip-show = true;
+        }
+    }
+
+    if root.tip-show && root.hover >= 0 && root.hover < root.blocks.length: Rectangle {
+        x: min(root.mx + 14px, root.width - self.width - 6px);
+        y: root.my + 22px + self.height > root.height ? root.my - self.height - 10px : root.my + 22px;
+        width: tip-text.preferred-width + 22px;
+        height: tip-text.preferred-height + 14px;
+        border-radius: 7px * Theme.round;
+        background: Theme.dark ? #262b38 : #1f2330;
+        drop-shadow-blur: 10px;
+        drop-shadow-color: #00000055;
+        tip-text := Text {
+            text: root.blocks[root.hover].tip;
+            color: #ffffff;
+            font-size: 11.5px * Theme.font-scale;
+        }
+    }
+}
+
+export component SpaceSection inherits VerticalLayout {
+    spacing: 12px;
+    HorizontalLayout {
+        spacing: 8px;
+        Text {
+            text: "Space map";
+            font-size: 18px * Theme.font-scale;
+            font-weight: 700;
+            color: Theme.text;
+            vertical-alignment: center;
+        }
+        Rectangle {
+            width: 6px;
+        }
+        for m[i] in Space.mounts: VerticalLayout {
+            alignment: center;
+            Chip {
+                text: m;
+                active: i == Space.mount;
+                clicked => {
+                    Space.mount = i;
+                    Space.select-mount(i);
+                }
+            }
+        }
+        Rectangle {
+            horizontal-stretch: 1;
+        }
+        VerticalLayout {
+            alignment: center;
+            if Space.state == 0: Btn {
+                text: "Scan";
+                primary: true;
+                clicked => {
+                    Space.scan();
+                }
+            }
+            if Space.state == 1: Btn {
+                text: "Cancel";
+                clicked => {
+                    Space.cancel();
+                }
+            }
+            if Space.state == 2: Btn {
+                text: "Rescan";
+                clicked => {
+                    Space.scan();
+                }
+            }
+        }
+    }
+
+    if Space.state == 0: Rectangle {
+        height: 110px;
+        border-radius: 10px * Theme.round;
+        background: Theme.surface-2;
+        border-width: 1px;
+        border-color: Theme.border;
+        Text {
+            width: parent.width - 60px;
+            text: Space.intro;
+            wrap: word-wrap;
+            horizontal-alignment: center;
+            font-size: 13px * Theme.font-scale;
+            color: Theme.dim;
+        }
+    }
+
+    if Space.state == 1: Rectangle {
+        height: 110px;
+        border-radius: 10px * Theme.round;
+        background: Theme.surface-2;
+        border-width: 1px;
+        border-color: Theme.border;
+        Text {
+            text: Space.progress;
+            font-size: 14px * Theme.font-scale;
+            color: Theme.text;
+        }
+    }
+
+    if Space.state == 2: VerticalLayout {
+        spacing: 8px;
+        HorizontalLayout {
+            spacing: 2px;
+            alignment: start;
+            for c[i] in Space.crumbs: HorizontalLayout {
+                spacing: 2px;
+                if i > 0: Text {
+                    text: "›";
+                    color: Theme.faint;
+                    font-size: 13px * Theme.font-scale;
+                    vertical-alignment: center;
+                }
+                Rectangle {
+                    height: 26px;
+                    min-width: crumb-text.preferred-width + 14px;
+                    border-radius: 6px * Theme.round;
+                    background: crumb-ta.has-hover ? Theme.hover : transparent;
+                    crumb-text := Text {
+                        text: c;
+                        font-size: 12.5px * Theme.font-scale;
+                        font-weight: i == Space.crumbs.length - 1 ? 700 : 400;
+                        color: i == Space.crumbs.length - 1 ? Theme.text : Theme.accent;
+                    }
+                    crumb-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            Space.crumb(i);
+                        }
+                    }
+                }
+            }
+        }
+        Rectangle {
+            height: 480px;
+            TreeMap {
+                blocks: Space.blocks;
+            }
+            if Space.confirm != "": Rectangle {
+                border-radius: 8px * Theme.round;
+                background: #00000088;
+                TouchArea { }
+                Rectangle {
+                    width: min(parent.width - 40px, 460px);
+                    height: body.preferred-height + 96px;
+                    border-radius: 12px * Theme.round;
+                    background: Theme.surface;
+                    border-width: 1px;
+                    border-color: Theme.border;
+                    drop-shadow-blur: 24px;
+                    drop-shadow-color: #00000066;
+                    VerticalLayout {
+                        padding: 20px;
+                        spacing: 16px;
+                        body := Text {
+                            text: Space.confirm;
+                            wrap: word-wrap;
+                            font-size: 13px * Theme.font-scale;
+                            color: Theme.text;
+                        }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            alignment: end;
+                            Btn {
+                                text: "Cancel";
+                                clicked => {
+                                    Space.cancel-trash();
+                                }
+                            }
+                            Btn {
+                                text: "Move to Trash";
+                                danger: true;
+                                clicked => {
+                                    Space.confirm-trash();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if Space.legend.length > 0: HorizontalLayout {
+            spacing: 14px;
+            alignment: start;
+            for l in Space.legend: HorizontalLayout {
+                spacing: 5px;
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: 10px;
+                        height: 10px;
+                        border-radius: 3px * Theme.round;
+                        background: l.color;
+                    }
+                }
+                Text {
+                    text: l.label;
+                    font-size: 11.5px * Theme.font-scale;
+                    color: Theme.dim;
+                }
+            }
+        }
+        Text {
+            text: Space.summary;
+            font-size: 11.5px * Theme.font-scale;
+            color: Theme.dim;
+            wrap: word-wrap;
+        }
+    }
+}

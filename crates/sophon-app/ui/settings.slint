@@ -1,0 +1,553 @@
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { Btn, Icon } from "widgets.slint";
+
+export struct SettingItem {
+    id: string,
+    /// Category name; shown on search results.
+    category: string,
+    label: string,
+    hint: string,
+    /// 0 toggle, 1 choice, 2 colour, 3 slider, 4 folder list, 5 order list, 6 button, 7 heading.
+    kind: int,
+    on: bool,
+    choice: int,
+    options: [string],
+    color: color,
+    value: float,
+    min: float,
+    max: float,
+    step: float,
+    value-text: string,
+    items: [string],
+    item-flags: [bool],
+    button: string,
+    status: string,
+    modified: bool,
+    restart: bool,
+}
+
+export global SettingsPage {
+    in property <[string]> categories;
+    in-out property <int> category;
+    in property <[SettingItem]> items;
+    in property <[color]> swatches;
+    callback select-category(int);
+    callback search(string);
+    callback toggle(string, bool);
+    callback choose(string, int);
+    callback pick-color(string, color);
+    callback slide(string, float);
+    callback reset(string);
+    callback list-add(string);
+    callback list-remove(string, int);
+    callback order-move(string, int, int);
+    callback order-toggle(string, int, bool);
+    callback press(string);
+}
+
+component Switch inherits Rectangle {
+    in property <bool> on;
+    callback toggled(bool);
+    width: 42px;
+    height: 24px;
+    border-radius: 12px * Theme.round;
+    background: root.on ? Theme.accent : (ta.has-hover ? Theme.hover : Theme.surface-2);
+    border-width: root.on ? 0px : 1px;
+    border-color: Theme.border;
+    animate background { duration: 150ms * Theme.anim; }
+    Rectangle {
+        x: root.on ? parent.width - self.width - 3px : 3px;
+        y: 3px;
+        width: 18px;
+        height: 18px;
+        border-radius: 9px * Theme.round;
+        background: root.on ? #ffffff : Theme.dim;
+        animate x { duration: 160ms * Theme.anim; easing: ease-out; }
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.toggled(!root.on);
+        }
+    }
+}
+
+component Segmented inherits Rectangle {
+    in property <[string]> options;
+    in property <int> current;
+    callback chosen(int);
+    height: 30px;
+    border-radius: 9px * Theme.round;
+    background: Theme.surface-2;
+    border-width: 1px;
+    border-color: Theme.border;
+    HorizontalLayout {
+        padding: 3px;
+        spacing: 2px;
+        for o[i] in root.options: Rectangle {
+            min-width: seg-text.preferred-width + 20px;
+            border-radius: 6px * Theme.round;
+            background: i == root.current ? Theme.accent : seg-ta.has-hover ? Theme.hover : transparent;
+            seg-text := Text {
+                text: o;
+                font-size: 12px * Theme.font-scale;
+                font-weight: i == root.current ? 600 : 400;
+                color: i == root.current ? #ffffff : Theme.dim;
+            }
+            seg-ta := TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
+                    root.chosen(i);
+                }
+            }
+        }
+    }
+}
+
+component Swatches inherits HorizontalLayout {
+    in property <color> current;
+    callback picked(color);
+    spacing: 6px;
+    for c in SettingsPage.swatches: Rectangle {
+        width: 24px;
+        height: 24px;
+        border-radius: 12px * Theme.round;
+        background: c;
+        border-width: c == root.current ? 3px : (sw-ta.has-hover ? 2px : 0px);
+        border-color: Theme.text;
+        sw-ta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => {
+                root.picked(c);
+            }
+        }
+    }
+}
+
+component Slider inherits Rectangle {
+    in property <float> value;
+    in property <float> min;
+    in property <float> max;
+    in property <float> step;
+    in property <string> value-text;
+    callback moved(float);
+    width: 240px;
+    height: 28px;
+    property <float> frac: (root.value - root.min) / Math.max(0.0001, root.max - root.min);
+    Rectangle {
+        x: 0;
+        y: (parent.height - 6px) / 2;
+        width: parent.width - 60px;
+        height: 6px;
+        border-radius: 3px * Theme.round;
+        background: Theme.surface-2;
+        Rectangle {
+            x: 0;
+            width: parent.width * root.frac;
+            border-radius: 3px * Theme.round;
+            background: Theme.accent;
+        }
+    }
+    knob := Rectangle {
+        x: (parent.width - 60px) * root.frac - 9px;
+        y: (parent.height - 18px) / 2;
+        width: 18px;
+        height: 18px;
+        border-radius: 9px * Theme.round;
+        background: slider-ta.has-hover || slider-ta.pressed ? Theme.text : Theme.accent;
+        border-width: 2px;
+        border-color: Theme.surface;
+    }
+    Text {
+        x: parent.width - 52px;
+        width: 52px;
+        text: root.value-text;
+        font-size: 12px * Theme.font-scale;
+        color: Theme.text;
+        horizontal-alignment: right;
+    }
+    slider-ta := TouchArea {
+        width: parent.width - 52px;
+        x: 0;
+        mouse-cursor: pointer;
+        function set(x: length) {
+            let f = Math.max(0, Math.min(1, x / (root.width - 60px)));
+            let raw = root.min + f * (root.max - root.min);
+            root.moved(Math.round(raw / root.step) * root.step);
+        }
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.down && event.button == PointerEventButton.left) {
+                self.set(self.mouse-x);
+            }
+        }
+        moved => {
+            self.set(self.mouse-x);
+        }
+    }
+}
+
+/// A list the user reorders by dragging the handle, with a show/hide checkbox per row.
+component OrderList inherits Rectangle {
+    in property <string> id;
+    in property <[string]> items;
+    in property <[bool]> flags;
+    property <length> row-h: 32px;
+    property <int> dragging: -1;
+    property <length> drag-y;
+    height: root.items.length * root.row-h;
+    for it[i] in root.items: Rectangle {
+        y: i == root.dragging ? root.drag-y - root.row-h / 2 : i * root.row-h;
+        height: root.row-h;
+        width: parent.width;
+        border-radius: 7px * Theme.round;
+        background: i == root.dragging ? Theme.selected : row-ta.has-hover ? Theme.hover : transparent;
+        z: i == root.dragging ? 1 : 0;
+        row-ta := TouchArea { }
+        HorizontalLayout {
+            padding-left: 6px;
+            spacing: 10px;
+            Rectangle {
+                width: 22px;
+                Icon {
+                    width: 16px;
+                    height: 16px;
+                    icon: "M 4 7 L 20 7 M 4 12 L 20 12 M 4 17 L 20 17";
+                    color: handle-ta.has-hover || i == root.dragging ? Theme.text : Theme.faint;
+                }
+                handle-ta := TouchArea {
+                    mouse-cursor: MouseCursor.grab;
+                    pointer-event(event) => {
+                        if (event.kind == PointerEventKind.down) {
+                            root.dragging = i;
+                            root.drag-y = i * root.row-h + self.mouse-y;
+                        }
+                        if (event.kind == PointerEventKind.up && root.dragging == i) {
+                            let target = Math.max(0, Math.min(root.items.length - 1, Math.floor(root.drag-y / root.row-h)));
+                            root.dragging = -1;
+                            if (target != i) {
+                                SettingsPage.order-move(root.id, i, target);
+                            }
+                        }
+                    }
+                    moved => {
+                        root.drag-y = i * root.row-h + self.mouse-y;
+                    }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 18px;
+                    height: 18px;
+                    border-radius: 5px * Theme.round;
+                    background: root.flags[i] ? Theme.accent : transparent;
+                    border-width: root.flags[i] ? 0px : 1.5px;
+                    border-color: check-ta.has-hover ? Theme.text : Theme.dim;
+                    if root.flags[i]: Icon {
+                        width: 14px;
+                        height: 14px;
+                        icon: "M 5 12 L 10 17 L 19 7";
+                        color: #ffffff;
+                    }
+                    check-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            SettingsPage.order-toggle(root.id, i, !root.flags[i]);
+                        }
+                    }
+                }
+            }
+            Text {
+                text: it;
+                font-size: 13px * Theme.font-scale;
+                color: root.flags[i] ? Theme.text : Theme.faint;
+                vertical-alignment: center;
+            }
+        }
+    }
+}
+
+component PathList inherits VerticalLayout {
+    in property <string> id;
+    in property <[string]> items;
+    spacing: 4px;
+    for p[i] in root.items: Rectangle {
+        height: 30px;
+        border-radius: 7px * Theme.round;
+        background: path-ta.has-hover ? Theme.hover : Theme.surface-2;
+        path-ta := TouchArea { }
+        Text {
+            x: 10px;
+            width: parent.width - 50px;
+            text: p;
+            font-size: 12px * Theme.font-scale;
+            color: Theme.text;
+            overflow: elide;
+        }
+        Rectangle {
+            x: parent.width - 30px;
+            width: 24px;
+            height: 24px;
+            border-radius: 6px * Theme.round;
+            background: rm-ta.has-hover ? Theme.danger.with-alpha(0.2) : transparent;
+            Icon {
+                width: 12px;
+                height: 12px;
+                icon: "M 6 6 L 18 18 M 18 6 L 6 18";
+                color: rm-ta.has-hover ? Theme.danger : Theme.dim;
+            }
+            rm-ta := TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
+                    SettingsPage.list-remove(root.id, i);
+                }
+            }
+        }
+    }
+    HorizontalLayout {
+        alignment: start;
+        Btn {
+            text: "Add folder…";
+            clicked => {
+                SettingsPage.list-add(root.id);
+            }
+        }
+    }
+}
+
+component SettingRow inherits Rectangle {
+    in property <SettingItem> it;
+    in property <bool> show-category;
+    property <bool> wide: it.kind == 4 || it.kind == 5;
+    property <bool> heading: it.kind == 7;
+    // Grow with the content (long descriptions, lists).
+    height: max(root.heading ? 40px : 64px, lay.preferred-height);
+    border-radius: 10px * Theme.round;
+    background: root.heading ? transparent : row-ta.has-hover ? Theme.hover : Theme.surface;
+    border-width: root.heading ? 0px : 1px;
+    border-color: Theme.border;
+    row-ta := TouchArea { }
+
+    lay := VerticalLayout {
+        padding: root.heading ? 4px : 14px;
+        padding-top: root.heading ? 16px : 14px;
+        spacing: 10px;
+        if root.heading: Text {
+            text: it.label;
+            font-size: 12px * Theme.font-scale;
+            font-weight: 700;
+            color: Theme.accent;
+        }
+        if !root.heading: HorizontalLayout {
+            spacing: 14px;
+            VerticalLayout {
+                alignment: center;
+                spacing: 3px;
+                horizontal-stretch: 1;
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    Text {
+                        text: it.label;
+                        font-size: 14px * Theme.font-scale;
+                        font-weight: 600;
+                        color: Theme.text;
+                    }
+                    if it.restart: Rectangle {
+                        height: 18px;
+                        min-width: badge.preferred-width + 12px;
+                        border-radius: 9px * Theme.round;
+                        background: Theme.heat.with-alpha(0.18);
+                        badge := Text {
+                            text: "restart";
+                            font-size: 10px * Theme.font-scale;
+                            color: Theme.heat;
+                        }
+                    }
+                    if root.show-category: Text {
+                        text: "· " + it.category;
+                        font-size: 11px * Theme.font-scale;
+                        color: Theme.faint;
+                        vertical-alignment: center;
+                    }
+                }
+                if it.hint != "": Text {
+                    text: it.hint;
+                    font-size: 12px * Theme.font-scale;
+                    color: Theme.dim;
+                    wrap: word-wrap;
+                }
+                if it.status != "": Text {
+                    text: it.status;
+                    font-size: 12px * Theme.font-scale;
+                    font-weight: 600;
+                    color: Theme.accent;
+                    wrap: word-wrap;
+                }
+            }
+            if !root.wide: VerticalLayout {
+                alignment: center;
+                if it.kind == 0: Switch {
+                    on: it.on;
+                    toggled(v) => {
+                        SettingsPage.toggle(it.id, v);
+                    }
+                }
+                if it.kind == 1: Segmented {
+                    options: it.options;
+                    current: it.choice;
+                    chosen(i) => {
+                        SettingsPage.choose(it.id, i);
+                    }
+                }
+                if it.kind == 2: Swatches {
+                    current: it.color;
+                    picked(c) => {
+                        SettingsPage.pick-color(it.id, c);
+                    }
+                }
+                if it.kind == 3: Slider {
+                    value: it.value;
+                    min: it.min;
+                    max: it.max;
+                    step: it.step;
+                    value-text: it.value-text;
+                    moved(v) => {
+                        SettingsPage.slide(it.id, v);
+                    }
+                }
+                if it.kind == 6: Btn {
+                    text: it.button;
+                    primary: true;
+                    clicked => {
+                        SettingsPage.press(it.id);
+                    }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 28px;
+                    height: 28px;
+                    border-radius: 7px * Theme.round;
+                    opacity: it.modified ? 1 : 0;
+                    background: reset-ta.has-hover ? Theme.hover : transparent;
+                    Icon {
+                        width: 15px;
+                        height: 15px;
+                        icon: "M 4 12 A 8 8 0 1 0 7 5.8 M 4 4 L 4 9 L 9 9";
+                        color: reset-ta.has-hover ? Theme.text : Theme.faint;
+                    }
+                    reset-ta := TouchArea {
+                        enabled: it.modified;
+                        mouse-cursor: pointer;
+                        clicked => {
+                            SettingsPage.reset(it.id);
+                        }
+                    }
+                }
+            }
+        }
+        if it.kind == 4: PathList {
+            id: it.id;
+            items: it.items;
+        }
+        if it.kind == 5: OrderList {
+            id: it.id;
+            items: it.items;
+            flags: it.item-flags;
+        }
+    }
+}
+
+export component SettingsView inherits Rectangle {
+    in property <string> search-text;
+    HorizontalLayout {
+        Rectangle {
+            width: 230px;
+            background: Theme.surface;
+            Rectangle {
+                x: parent.width - 1px;
+                width: 1px;
+                background: Theme.border;
+            }
+            VerticalLayout {
+                padding: 12px;
+                spacing: 4px;
+                alignment: start;
+                Rectangle {
+                    height: 34px;
+                    border-radius: 9px * Theme.round;
+                    background: Theme.surface-2;
+                    border-width: 1px;
+                    border-color: find.has-focus ? Theme.accent : Theme.border;
+                    if find.text == "": Text {
+                        x: 12px;
+                        text: "Find a setting";
+                        color: Theme.faint;
+                        font-size: 12.5px * Theme.font-scale;
+                    }
+                    find := TextInput {
+                        x: 12px;
+                        width: parent.width - 24px;
+                        height: parent.height;
+                        vertical-alignment: center;
+                        single-line: true;
+                        color: Theme.text;
+                        font-size: 13px * Theme.font-scale;
+                        edited => {
+                            SettingsPage.search(self.text);
+                        }
+                    }
+                }
+                Rectangle {
+                    height: 6px;
+                }
+                for c[i] in SettingsPage.categories: Rectangle {
+                    height: 36px;
+                    border-radius: 9px * Theme.round;
+                    background: i == SettingsPage.category && find.text == "" ? Theme.selected : cat-ta.has-hover ? Theme.hover : transparent;
+                    Text {
+                        x: 12px;
+                        text: c;
+                        font-size: 13.5px * Theme.font-scale;
+                        font-weight: i == SettingsPage.category ? 600 : 400;
+                        color: Theme.text;
+                    }
+                    cat-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            find.text = "";
+                            SettingsPage.category = i;
+                            SettingsPage.select-category(i);
+                        }
+                    }
+                }
+            }
+        }
+        ScrollView {
+            horizontal-stretch: 1;
+            VerticalLayout {
+                padding: 22px;
+                spacing: 8px;
+                alignment: start;
+                Text {
+                    text: find.text != "" ? "Search results" : SettingsPage.categories[SettingsPage.category];
+                    font-size: 26px * Theme.font-scale;
+                    font-weight: 700;
+                    color: Theme.text;
+                }
+                if SettingsPage.items.length == 0: Text {
+                    text: "No settings match “" + find.text + "”.";
+                    font-size: 13px * Theme.font-scale;
+                    color: Theme.dim;
+                }
+                for it in SettingsPage.items: SettingRow {
+                    it: it;
+                    show-category: find.text != "";
+                }
+            }
+        }
+    }
+}

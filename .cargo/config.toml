@@ -1,0 +1,3 @@
+[env]
+# Load fontconfig at runtime instead of linking it: no -devel headers needed to build.
+RUST_FONTCONFIG_DLOPEN = "on"
