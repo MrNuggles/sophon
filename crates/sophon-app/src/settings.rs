@@ -124,6 +124,8 @@ pub struct Settings {
     pub tip_gpu: bool,
     pub tip_temps: bool,
     pub tip_net: bool,
+    // Docker (feature "docker"). Each is (display name, "host:port").
+    pub docker_servers: Vec<(String, String)>,
 }
 
 pub const UPDATE_MS: [u64; 5] = [500, 1000, 2000, 5000, 0];
@@ -197,6 +199,7 @@ impl Default for Settings {
             tip_gpu: true,
             tip_temps: true,
             tip_net: false,
+            docker_servers: Vec::new(),
         }
     }
 }
@@ -335,6 +338,11 @@ impl Settings {
                 "tray.gpu" => self.tip_gpu = b(),
                 "tray.temps" => self.tip_temps = b(),
                 "tray.net" => self.tip_net = b(),
+                "docker.server" => {
+                    if let Some((n, a)) = value.split_once('|') {
+                        self.docker_servers.push((n.trim().to_string(), a.trim().to_string()));
+                    }
+                }
                 _ => {}
             }
         }
@@ -429,6 +437,9 @@ impl Settings {
         kv("tray.gpu", self.tip_gpu.to_string());
         kv("tray.temps", self.tip_temps.to_string());
         kv("tray.net", self.tip_net.to_string());
+        for (name, addr) in &self.docker_servers {
+            kv("docker.server", format!("{name}|{addr}"));
+        }
         o
     }
 }

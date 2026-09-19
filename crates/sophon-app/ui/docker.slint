@@ -1,0 +1,375 @@
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { Btn, Icon, Avatar } from "widgets.slint";
+
+export struct DockerRow {
+    /// 0 = server header, 1 = container.
+    kind: int,
+    server: int,
+    id: string,
+    name: string,
+    image: string,
+    /// running / exited / created / paused / restarting / dead.
+    state: string,
+    state-color: color,
+    status: string,
+    ports: string,
+    running: bool,
+    selected: bool,
+    /// Server header only: connection state text + whether it errored.
+    server-status: string,
+    server-error: bool,
+}
+
+export global DockerPage {
+    in property <[DockerRow]> rows;
+    in property <string> summary;
+    /// True once at least one server is configured.
+    in property <bool> configured;
+    in property <string> selected-id;
+    /// Container action: op in "start" | "stop" | "restart".
+    callback action(string, string);
+    /// Server op: "refresh" | "remove", with the server index.
+    callback server-op(int, string);
+    callback add-server(string, string);
+    callback select(string);
+}
+
+component StateDot inherits Rectangle {
+    in property <color> tint;
+    width: 9px;
+    height: 9px;
+    border-radius: 4.5px * Theme.round;
+    background: root.tint;
+}
+
+component ActionBtn inherits Rectangle {
+    in property <string> icon;
+    in property <string> tip;
+    in property <color> tint;
+    callback clicked;
+    width: 30px;
+    height: 30px;
+    border-radius: 7px * Theme.round;
+    background: ta.has-hover ? root.tint.with-alpha(0.18) : transparent;
+    Icon {
+        width: 15px;
+        height: 15px;
+        icon: root.icon;
+        color: ta.has-hover ? root.tint : Theme.dim;
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+component ContainerRow inherits Rectangle {
+    in property <DockerRow> item;
+    callback act(string);
+    callback select();
+    height: 52px;
+    background: root.item.selected ? Theme.selected : ta.has-hover ? Theme.hover : transparent;
+    ta := TouchArea {
+        clicked => {
+            root.select();
+        }
+    }
+    ContextMenuArea {
+        Menu {
+            MenuItem {
+                title: root.item.running ? "Restart" : "Start";
+                activated => {
+                    root.act(root.item.running ? "restart" : "start");
+                }
+            }
+            MenuItem {
+                title: "Stop";
+                activated => {
+                    root.act("stop");
+                }
+            }
+        }
+        HorizontalLayout {
+            padding-left: 20px;
+            padding-right: 14px;
+            spacing: 12px;
+            VerticalLayout {
+                alignment: center;
+                StateDot {
+                    tint: root.item.state-color;
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                horizontal-stretch: 1;
+                spacing: 2px;
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: root.item.name;
+                        font-size: 13.5px * Theme.font-scale;
+                        font-weight: 600;
+                        color: Theme.text;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: root.item.state;
+                        font-size: 11px * Theme.font-scale;
+                        color: root.item.state-color;
+                        vertical-alignment: center;
+                    }
+                }
+                Text {
+                    text: root.item.image + (root.item.ports != "" ? "     " + root.item.ports : "");
+                    font-size: 11px * Theme.font-scale;
+                    color: Theme.dim;
+                    overflow: elide;
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                Text {
+                    text: root.item.status;
+                    font-size: 11px * Theme.font-scale;
+                    color: Theme.faint;
+                    horizontal-alignment: right;
+                }
+            }
+            // Actions: start (if down) or restart (if up), and stop.
+            VerticalLayout {
+                alignment: center;
+                HorizontalLayout {
+                    spacing: 2px;
+                    if !root.item.running: ActionBtn {
+                        icon: "M 7 5 L 19 12 L 7 19 Z";
+                        tint: Theme.gpu;
+                        clicked => {
+                            root.act("start");
+                        }
+                    }
+                    if root.item.running: ActionBtn {
+                        icon: "M 5 5 L 12 12 M 12 12 L 5 19 M 19 5 A 10 10 0 0 1 19 19";
+                        tint: Theme.cpu;
+                        clicked => {
+                            root.act("restart");
+                        }
+                    }
+                    if root.item.running: ActionBtn {
+                        icon: "M 7 7 L 17 7 L 17 17 L 7 17 Z";
+                        tint: Theme.danger;
+                        clicked => {
+                            root.act("stop");
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+component ServerHeader inherits Rectangle {
+    in property <DockerRow> item;
+    callback op(string);
+    height: 40px;
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        spacing: 8px;
+        VerticalLayout {
+            alignment: center;
+            StateDot {
+                tint: root.item.server-error ? Theme.danger : Theme.gpu;
+            }
+        }
+        Text {
+            text: root.item.name;
+            font-size: 13px * Theme.font-scale;
+            font-weight: 700;
+            color: Theme.text;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.item.server-status;
+            font-size: 11.5px * Theme.font-scale;
+            color: root.item.server-error ? Theme.danger : Theme.dim;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+        ActionBtn {
+            icon: "M 20 11 A 8 8 0 1 0 19 15 M 20 5 L 20 11 L 14 11";
+            tint: Theme.accent;
+            clicked => {
+                root.op("refresh");
+            }
+        }
+        ActionBtn {
+            icon: "M 6 6 L 18 18 M 18 6 L 6 18";
+            tint: Theme.danger;
+            clicked => {
+                root.op("remove");
+            }
+        }
+    }
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: Theme.border;
+    }
+}
+
+component AddServerForm inherits Rectangle {
+    property <string> name-text;
+    property <string> addr-text;
+    height: 56px;
+    border-radius: 10px * Theme.round;
+    background: Theme.surface;
+    border-width: 1px;
+    border-color: Theme.border;
+    HorizontalLayout {
+        padding: 10px;
+        spacing: 10px;
+        Rectangle {
+            width: 180px;
+            border-radius: 8px * Theme.round;
+            background: Theme.surface-2;
+            border-width: 1px;
+            border-color: name-in.has-focus ? Theme.accent : Theme.border;
+            if name-in.text == "": Text {
+                x: 10px;
+                text: "Name (e.g. NAS)";
+                color: Theme.faint;
+                font-size: 12.5px * Theme.font-scale;
+            }
+            name-in := TextInput {
+                x: 10px;
+                width: parent.width - 20px;
+                height: parent.height;
+                vertical-alignment: center;
+                single-line: true;
+                color: Theme.text;
+                font-size: 13px * Theme.font-scale;
+            }
+        }
+        Rectangle {
+            horizontal-stretch: 1;
+            border-radius: 8px * Theme.round;
+            background: Theme.surface-2;
+            border-width: 1px;
+            border-color: addr-in.has-focus ? Theme.accent : Theme.border;
+            if addr-in.text == "": Text {
+                x: 10px;
+                text: "Address — host:port of the socket proxy (e.g. 10.0.0.5:2375)";
+                color: Theme.faint;
+                font-size: 12.5px * Theme.font-scale;
+            }
+            addr-in := TextInput {
+                x: 10px;
+                width: parent.width - 20px;
+                height: parent.height;
+                vertical-alignment: center;
+                single-line: true;
+                color: Theme.text;
+                font-size: 13px * Theme.font-scale;
+                accepted => {
+                    DockerPage.add-server(name-in.text, addr-in.text);
+                    name-in.text = "";
+                    addr-in.text = "";
+                }
+            }
+        }
+        Btn {
+            text: "Add server";
+            primary: true;
+            clicked => {
+                DockerPage.add-server(name-in.text, addr-in.text);
+                name-in.text = "";
+                addr-in.text = "";
+            }
+        }
+    }
+}
+
+export component DockerView inherits Rectangle {
+    HorizontalLayout {
+        VerticalLayout {
+            horizontal-stretch: 1;
+            HorizontalLayout {
+                padding-left: 18px;
+                padding-right: 14px;
+                padding-top: 12px;
+                padding-bottom: 10px;
+                spacing: 10px;
+                Text {
+                    text: "Docker";
+                    font-size: 20px * Theme.font-scale;
+                    font-weight: 700;
+                    color: Theme.text;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: DockerPage.summary;
+                    font-size: 12px * Theme.font-scale;
+                    color: Theme.dim;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+            }
+            ScrollView {
+                VerticalLayout {
+                    padding: 14px;
+                    padding-top: 4px;
+                    spacing: 8px;
+                    alignment: start;
+                    if !DockerPage.configured: Rectangle {
+                        height: 120px;
+                        border-radius: 10px * Theme.round;
+                        background: Theme.surface-2;
+                        border-width: 1px;
+                        border-color: Theme.border;
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 6px;
+                            Text {
+                                text: "Connect to a server running Docker";
+                                font-size: 15px * Theme.font-scale;
+                                font-weight: 600;
+                                color: Theme.text;
+                                horizontal-alignment: center;
+                            }
+                            Text {
+                                text: "Point Sophon at a docker-socket-proxy on your LAN. It lists containers live and can start, stop and restart them.";
+                                width: 520px;
+                                wrap: word-wrap;
+                                font-size: 12.5px * Theme.font-scale;
+                                color: Theme.dim;
+                                horizontal-alignment: center;
+                            }
+                        }
+                    }
+                    for row[i] in DockerPage.rows: Rectangle {
+                        height: row.kind == 0 ? 40px : 52px;
+                        if row.kind == 0: ServerHeader {
+                            item: row;
+                            op(o) => {
+                                DockerPage.server-op(row.server, o);
+                            }
+                        }
+                        if row.kind == 1: ContainerRow {
+                            item: row;
+                            act(a) => {
+                                DockerPage.action(row.id, a);
+                            }
+                            select => {
+                                DockerPage.select(row.id);
+                            }
+                        }
+                    }
+                    AddServerForm { }
+                }
+            }
+        }
+    }
+}

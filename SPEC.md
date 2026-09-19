@@ -632,6 +632,44 @@ SOPHON_SNAPSHOT=/tmp/shots ./target/release/sophon      # render every view to P
 SOPHON_DEBUG=1 ./target/release/sophon                  # log visibility/frames/UI cost
 ```
 
+## 11. Modular panels & the Docker tab
+
+**Panel registry.** Tabs are registered in `sophon-app/src/panels.rs`:
+`panels()` returns an ordered `Vec<Panel { id, title }>`, feature-gated for
+optional tabs. `id_at(index)` resolves an index to a panel id. The tab bar in
+`app.slint` is data-driven (`tab-labels` / `tab-ids` models set from the
+registry); each body is `if root.current-id == "<id>": <View> {}`. Nothing else
+hard-codes a tab number — the sampler learns "is the process tab visible" from a
+`Shared.processes_visible` atomic, not an index. **Adding a tab = (1) one entry
+in `panels()`, (2) one install call in `main.rs` (`#[cfg]`'d if optional),
+(3) one `if` line + import in `app.slint`.** Removing = delete those. Optional
+panels are behind Cargo features so a default build has no trace of them.
+
+**Docker crate (`sophon-docker`, dependency-free).**
+- `http.rs` — a tiny blocking HTTP/1.1 client over `TcpStream` (connect + r/w
+  timeouts). Sends `GET`/`POST` with `Connection: close`; parses status +
+  headers, handling `Content-Length`, chunked transfer, and read-to-close.
+  Caps body size (8 MB) and total time (4 s). Plain HTTP only (no TLS — it
+  targets a socket proxy on a trusted LAN).
+- `json.rs` — a minimal recursive-descent JSON parser (`Value` enum), UTF-8
+  correct, with a recursion-depth cap. Enough for the Docker API.
+- `lib.rs` — `Server { name, host, port }` (`parse("host:port")`), `Container`
+  (id, name, image, state, status, ports), `list(server)` →
+  `GET /containers/json?all=1`, and `action(server, id, "start"|"stop"|
+  "restart")` → `POST /containers/{id}/{op}` (id validated ASCII-alphanumeric;
+  204/304 = success). Friendly messages for 403 (proxy allowlist) etc.
+
+**Docker panel (`sophon-app/src/docker_panel.rs`, feature `docker`).** Owns a
+poller thread that lists every configured server, sorts containers running-first,
+and delivers results to the UI via `invoke_from_event_loop`. Polls every 2 s
+while the tab is visible, 15 s otherwise (Rule 1); woken early on actions/config
+changes. `docker.slint` renders server-header rows (name, connection status,
+refresh + remove) and container rows (state dot, name, image, published ports as
+`host→container/proto`, status, and start/stop/restart buttons + context menu),
+plus an add-server form. Servers persist in settings as `docker.server =
+name|host:port`. **Connectivity is a socket proxy over plain HTTP; never the raw
+Docker socket over TCP — see docs/docker.md and SECURITY.md.**
+
 ## 10. What is deliberately not done yet
 Steam/Proton game grouping with cover art; app icons from the icon theme;
 pause/resume an app (`cgroup.freeze`) and atomic `cgroup.kill`; priority/affinity

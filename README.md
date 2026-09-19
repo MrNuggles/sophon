@@ -61,6 +61,21 @@ See **[SPEC.md](SPEC.md)** for a complete from-scratch build specification
 
 Light, dark and follow-system themes. `Ctrl+Tab` cycles the three tabs (Processes, Performance, Settings).
 
+## Optional tabs
+
+Sophon is built from **panels** registered in one place (`src/panels.rs`), so a
+feature tab is added in three small spots and gated behind a Cargo feature. The
+default build has only the built-in tabs and **no network code**.
+
+- **Docker** (`--features docker`): connect to Docker on your LAN servers, list
+  containers (running and stopped) with their published ports and server, and
+  start / stop / restart them live. Requires a socket proxy on each server —
+  see **[docs/docker.md](docs/docker.md)**.
+
+```bash
+cargo build --release --features docker
+```
+
 ## Resource use
 
 Measured on a Ryzen 7 5800X / RX 6950 XT, ~500 processes, with a game running:
@@ -128,7 +143,10 @@ crates/
     netproc.rs            per-process TCP throughput (sock_diag); eBPF cookies when admin is on
     space.rs              parallel treemap scanner, mount discovery, scan cache
     sampler.rs            ties collectors together; one Snapshot per tick
+  sophon-docker/          optional Docker Engine API client (hand-rolled HTTP + JSON; feature "docker")
   sophon-app/             Slint GUI (depends on sophon-core)
+    src/panels.rs        the tab registry (add/remove a tab in one place)
+    src/docker_panel.rs  Docker tab controller + poller (feature "docker")
     build.rs             compiles ui/app.slint
     ui/*.slint           theme, widgets, Processes/Performance/Settings/Space views
     src/main.rs          window, tray, sampler thread, CLI (--helper/--install/--tray)

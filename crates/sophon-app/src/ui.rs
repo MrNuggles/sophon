@@ -447,15 +447,20 @@ impl Ui {
     fn render(&mut self) {
         let Some(app) = self.app.upgrade() else { return };
         self.render_status(&app);
-        match app.get_tab() {
-            0 => self.render_processes(),
-            _ => self.render_perf(),
+        match crate::panels::id_at(app.get_tab()) {
+            "processes" => self.render_processes(),
+            "performance" => self.render_perf(),
+            _ => {}
         }
     }
 
     fn tab_changed(&mut self, tab: i32) {
         self.shared.tab.store(tab as u8, Relaxed);
-        if tab == 0 {
+        let id = crate::panels::id_at(tab);
+        self.shared.processes_visible.store(id == "processes", Relaxed);
+        #[cfg(feature = "docker")]
+        crate::docker_panel::set_visible(id == "docker");
+        if id == "processes" {
             // The process table isn't refreshed while hidden behind another tab.
             let _ = self.shared.wake.send(());
         }
@@ -597,7 +602,7 @@ impl Ui {
 
     fn render_processes(&mut self) {
         let Some(app) = self.app.upgrade() else { return };
-        if app.get_tab() != 0 {
+        if crate::panels::id_at(app.get_tab()) != "processes" {
             return;
         }
         let prefs = settings::get(|s| s.clone());
@@ -941,7 +946,7 @@ impl Ui {
 
     fn render_perf(&mut self) {
         let Some(app) = self.app.upgrade() else { return };
-        if app.get_tab() != 1 {
+        if crate::panels::id_at(app.get_tab()) != "performance" {
             return;
         }
         let s = &self.snap;

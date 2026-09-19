@@ -12,6 +12,9 @@ mod settings;
 mod space_ui;
 mod ui;
 mod admin;
+mod panels;
+#[cfg(feature = "docker")]
+mod docker_panel;
 mod ebpf;
 mod helper;
 mod settings_page;
@@ -29,6 +32,8 @@ pub struct Shared {
     /// Current tab (0 = processes); the process table is only sampled when shown.
     pub tab: AtomicU8,
     pub hidden: AtomicBool,
+    /// The Processes panel is the current tab (drives whether we sample it).
+    pub processes_visible: AtomicBool,
     /// Sampling interval while visible, in ms (0 = paused). From settings.
     pub interval_ms: AtomicU64,
     /// Sampling interval while in the tray, in ms (0 = off).
@@ -72,6 +77,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (wake, rx) = mpsc::channel();
     let shared = Arc::new(Shared { tab: AtomicU8::new(0), hidden: AtomicBool::new(false),
         in_tray: AtomicBool::new(false),
+        processes_visible: AtomicBool::new(true),
         interval_ms: AtomicU64::new(settings::UPDATE_MS[prefs.update_speed]),
         tray_interval_ms: AtomicU64::new(settings::TRAY_SECS[prefs.tray_rate] * 1000),
         wake,
@@ -79,6 +85,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ui::install(&app, shared.clone());
     space_ui::install(&app);
     settings_page::install(&app, shared.clone());
+    #[cfg(feature = "docker")]
+    docker_panel::install(&app);
+    // Data-driven tab bar from the panel registry.
+    let reg = panels::panels();
+    let labels: Vec<slint::SharedString> = reg.iter().map(|p| p.title.into()).collect();
+    let ids: Vec<slint::SharedString> = reg.iter().map(|p| p.id.into()).collect();
+    app.set_tab_labels(slint::ModelRc::new(slint::VecModel::from(labels)));
+    app.set_tab_ids(slint::ModelRc::new(slint::VecModel::from(ids)));
 
     // Visibility: X11 reports occlusion directly; on Wayland we notice that
     // frames stop being presented (compositors withhold frame callbacks).
@@ -196,7 +210,7 @@ fn sampler_loop(wake: mpsc::Receiver<()>, shared: Arc<Shared>) {
         // The process table is the costliest part: every tick while it's on screen,
         // every other tick otherwise (Rewind uses it to name spike culprits), and
         // at the slow hidden cadence so spikes while gaming can still be explained.
-        let with_processes = hidden || shared.tab.load(Relaxed) == 0 || tick % 2 == 0;
+        let with_processes = hidden || shared.processes_visible.load(Relaxed) || tick % 2 == 0;
         let snap = sampler.sample(with_processes);
         if slint::invoke_from_event_loop(move || ui::apply(snap)).is_err() {
             return; // UI is gone

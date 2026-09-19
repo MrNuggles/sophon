@@ -54,6 +54,25 @@ exists between choosing a PID and the helper acting on it; and `net-read` expose
 aggregate byte counts of *unidentifiable* system sockets to the user's GUI (no
 contents, no attribution) which are ignored.
 
+## Optional Docker tab (feature "docker", off by default)
+
+The default build has **no network code**. Building with `--features docker` adds
+a tab that talks plain HTTP to a Docker socket proxy on your LAN. This makes
+Sophon a **network client to a root-equivalent API**, so the risk moves to the
+servers:
+
+- Sophon connects **out** to `host:port`; it still opens no listener itself.
+- The container ids it sends are validated (ASCII alphanumeric only) and only the
+  three needed endpoints are ever called (list, start/stop/restart). The JSON and
+  HTTP parsers are bounds-checked with recursion/size caps, and `panic = "abort"`
+  keeps a malformed response to a clean crash.
+- **You must run a filtered socket proxy** (`CONTAINERS=1 POST=1`, everything else
+  denied) and firewall its port to Sophon's machine — see `docs/docker.md`.
+  Exposing the raw Docker socket over TCP is a full host compromise.
+- Server addresses live in `~/.config/sophon/settings.conf`; nothing is hardcoded
+  and there are no credentials (the proxy is unauthenticated on the trusted LAN,
+  which is why it must be firewalled).
+
 ## Packaging requirement (before distributing to others)
 
 pkexec runs **the binary at the path Sophon was launched from**. When that binary
