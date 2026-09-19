@@ -82,6 +82,9 @@ pub fn install(remove: bool) -> std::io::Result<()> {
         println!("wrote {}", path.display());
     }
     let exe = std::env::current_exe()?;
+    if exe.to_string_lossy().contains(|c: char| c.is_control()) {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "executable path contains control characters"));
+    }
     std::fs::create_dir_all(desktop.parent().expect("has parent"))?;
     std::fs::write(
         &desktop,

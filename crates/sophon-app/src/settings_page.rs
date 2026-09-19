@@ -738,6 +738,10 @@ fn write_autostart(s: &Settings) {
         return;
     }
     let exe = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_else(|_| "sophon".into());
+    // A path with control chars could inject extra .desktop keys; refuse rather than emit a bad file.
+    if exe.contains(|c: char| c.is_control()) {
+        return;
+    }
     let args = if s.start_in_tray { " --tray" } else { "" };
     let _ = std::fs::create_dir_all(path.parent().expect("has parent"));
     let _ = std::fs::write(
