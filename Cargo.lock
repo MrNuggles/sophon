@@ -3931,7 +3931,7 @@ dependencies = [
 
 [[package]]
 name = "sophon-app"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fontique",
  "libc",
@@ -3943,14 +3943,14 @@ dependencies = [
 
 [[package]]
 name = "sophon-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "sophon-docker"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "spin_on"

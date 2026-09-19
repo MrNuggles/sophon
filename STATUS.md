@@ -9,11 +9,9 @@ security model, [SECURITY.md](SECURITY.md).
 
 ## Where we are right now
 
-- **Tagged release:** `v0.1` on `main` — the full task manager (Processes,
-  Performance, Settings) plus tray, admin helper, and the security pass.
-- **Active branch:** `docker-modular` (ahead of `main`) — adds the modular panel
-  system and the optional Docker tab. **Not yet merged into `main`** (pending a
-  real-server tryout on the two LAN Docker hosts).
+- **Tagged release:** `v0.2` on `main` — the full task manager (Processes,
+  Performance, Settings) plus tray, admin helper, the security pass, the modular
+  panel system, and the optional Docker tab.
 - **Build:** clean in both configs (`cargo build --release` and
   `--features docker`); no warnings.
 - **Tests:** 30 passing (7 app + 13 core + 10 docker).
@@ -101,7 +99,6 @@ updates; add/remove servers in-tab.
 
 ## Open decisions / next steps
 
-- [ ] **Merge `docker-modular` → `main`** once the real servers check out.
 - [ ] Optional: confirmation dialog on container **stop** (currently none, to
       match Portainer/Docker Desktop).
 - [ ] Packaging for distribution: install the binary to a **root-owned** path
