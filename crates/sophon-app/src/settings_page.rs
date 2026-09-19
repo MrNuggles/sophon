@@ -226,6 +226,9 @@ pub fn apply_all() {
         t.set_graph_style(s.graph_style as i32);
         t.set_line_scale(s.line_width);
         t.set_graph_grid(s.graph_grid);
+        // Window behaviour (X11 honours this everywhere; on Wayland the
+        // compositor decides).
+        crate::set_always_on_top(&app, s.always_on_top);
         // Rebuild the tab bar in case a Settings → Tabs toggle changed the set.
         crate::sync_tabs(&app);
     }
@@ -345,6 +348,7 @@ fn build(s: &Settings, p: &Page) -> Vec<SettingItem> {
     v.push(toggle(c, "autostart", "Start at login", "Launch Sophon automatically when you sign in.", s.autostart, d.autostart));
     v.push(toggle(c, "start_in_tray", "Start hidden in the tray", "When starting at login, go straight to the tray instead of opening the window.", s.start_in_tray, d.start_in_tray));
     v.push(heading(c, "WINDOW & TRAY"));
+    v.push(toggle(c, "always_on_top", "Always on top", "Keep Sophon above every other window, like the Windows Task Manager.", s.always_on_top, d.always_on_top));
     v.push(choice(c, "close_to_tray", "Close button", "What the window's close button does.", &["Send to tray", "Quit Sophon"], if s.close_to_tray { 0 } else { 1 }, 0));
     v.push(choice(c, "tray_click", "Clicking the tray icon", "Open always brings the window up; Toggle also hides it when it's already open.", &["Open", "Toggle"], s.tray_click, d.tray_click));
     v.push(heading(c, "SAFETY"));
@@ -534,6 +538,7 @@ fn set_bool(s: &mut Settings, id: &str, v: bool) {
         "autostart" => s.autostart = v,
         "start_in_tray" => s.start_in_tray = v,
         "admin_on_start" => s.admin_on_start = v,
+        "always_on_top" => s.always_on_top = v,
         "tabs_performance" => s.tabs_performance = v,
         "tabs_docker" => s.tabs_docker = v,
         "tabs_proxy" => s.tabs_proxy = v,
@@ -656,6 +661,7 @@ fn get_bool(s: &Settings, id: &str) -> Option<bool> {
         "autostart" => s.autostart,
         "start_in_tray" => s.start_in_tray,
         "admin_on_start" => s.admin_on_start,
+        "always_on_top" => s.always_on_top,
         "tabs_performance" => s.tabs_performance,
         "tabs_docker" => s.tabs_docker,
         "tabs_proxy" => s.tabs_proxy,

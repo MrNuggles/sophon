@@ -76,6 +76,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Must follow platform init (AppWindow::new) and precede the window being shown.
     slint::set_xdg_app_id("sophon")?;
     app.set_app_icon(icon::image(64));
+    // Restores the Settings → General "Always on top" choice at startup.
+    set_always_on_top(&app, prefs.always_on_top);
     let (wake, rx) = mpsc::channel();
     let shared = Arc::new(Shared { tab: AtomicU8::new(0), hidden: AtomicBool::new(false),
         in_tray: AtomicBool::new(false),
@@ -260,4 +262,14 @@ fn debug_log(msg: &str) {
     if std::env::var_os("SOPHON_DEBUG").is_some() {
         eprintln!("sophon: {msg}");
     }
+}
+
+/// Applies the Settings → General "Always on top" choice through the winit
+/// window (Slint's window API doesn't expose the window level). X11 and
+/// Windows honour it; on Wayland the compositor decides.
+pub fn set_always_on_top(app: &AppWindow, on: bool) {
+    use slint::winit_030::winit::window::WindowLevel;
+    let _ = app.window().with_winit_window(|w| {
+        w.set_window_level(if on { WindowLevel::AlwaysOnTop } else { WindowLevel::Normal });
+    });
 }

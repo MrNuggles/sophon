@@ -41,7 +41,7 @@ for the trust model.
 - Network: receive/send throughput per interface
 
 **Settings** (☰ button beside the theme toggle, live preview, search, per-setting reset)
-- General: startup, close-to-tray behaviour, confirmations, and **admin access**
+- General: startup, close-to-tray behaviour, confirmations, **always on top** (like the Windows Task Manager), and **admin access**
 - Appearance: theme, accent + per-metric colours, scale, density, corner roundness, graph style, animations
 - Resource use: update speed (0.5–5 s / paused), tray update rate, CPU/GPU renderer
 - Processes tab: drag/hide/resize columns, grouping (app/tree/flat), name style, units, CPU % mode, row actions

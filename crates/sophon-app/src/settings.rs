@@ -28,6 +28,7 @@ pub const SWATCHES: [u32; 12] = [
 #[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
     // General
+    pub always_on_top: bool,
     pub autostart: bool,
     pub start_in_tray: bool,
     pub close_to_tray: bool,
@@ -148,6 +149,7 @@ pub const RANGE_SECS: [f32; 5] = [60.0, 300.0, 600.0, 3600.0, 86400.0];
 impl Default for Settings {
     fn default() -> Self {
         Settings {
+            always_on_top: false,
             autostart: false,
             start_in_tray: false,
             close_to_tray: true,
@@ -297,6 +299,7 @@ impl Settings {
             let c = || u32::from_str_radix(value.trim_start_matches('#'), 16).unwrap_or(0);
             let list = || value.split(',').map(str::trim).filter(|s| !s.is_empty()).map(String::from).collect::<Vec<_>>();
             match key {
+                "general.always_on_top" => self.always_on_top = b(),
                 "general.autostart" => self.autostart = b(),
                 "general.start_in_tray" => self.start_in_tray = b(),
                 "general.close_to_tray" => self.close_to_tray = b(),
@@ -404,6 +407,7 @@ impl Settings {
             o.push_str(&v);
             o.push('\n');
         };
+        kv("general.always_on_top", self.always_on_top.to_string());
         kv("general.autostart", self.autostart.to_string());
         kv("general.start_in_tray", self.start_in_tray.to_string());
         kv("general.close_to_tray", self.close_to_tray.to_string());
