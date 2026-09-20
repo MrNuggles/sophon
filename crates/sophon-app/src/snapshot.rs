@@ -62,6 +62,9 @@ enum Step {
 
 pub fn start(app: &AppWindow, dir: PathBuf) {
     let _ = std::fs::create_dir_all(&dir);
+    // One grouped pass, in tab order: Processes → Performance (+ space) →
+    // Docker → Proxy → Settings → light mode. Tab enable/disable goes through
+    // the toggles' global callbacks, so nothing bounces to Settings and back.
     let mut steps = vec![Step::Wait, Step::Wait, Step::Wait, Step::Wait, Step::Shot("processes")];
     // Optional: SOPHON_SNAPSHOT_FILTER narrows the process list (search box) for the detail shots.
     if let Ok(filter) = std::env::var("SOPHON_SNAPSHOT_FILTER") {
@@ -71,6 +74,21 @@ pub fn start(app: &AppWindow, dir: PathBuf) {
     steps.extend([Step::ToggleRow(1), Step::Wait, Step::SelectRow(2), Step::Wait, Step::Wait, Step::Shot("processes-child")]);
     // Collapse the Apps section.
     steps.extend([Step::SelectRow(0), Step::Wait, Step::Shot("processes-collapsed"), Step::SelectRow(0)]);
+    // A few settings applied live (compact density, bar graphs, rounder corners).
+    steps.extend([
+        Step::SetChoice("density", 1),
+        Step::SetChoice("graph_style", 3),
+        Step::SetSlide("roundness", 0.2),
+        Step::SetToggle("show_kernel", true),
+        Step::Wait,
+        Step::Shot("live-compact-bars"),
+        Step::SetChoice("density", 0),
+        Step::SetChoice("graph_style", 0),
+        Step::SetSlide("roundness", 1.0),
+        Step::SetToggle("show_kernel", false),
+    ]);
+
+    // Performance (dark): Rewind, then every tile.
     steps.push(Step::TabId("performance"));
     // Rewind: simulated hover (crosshair on every graph + tooltip), then a drag-zoom.
     steps.extend([Step::Tile(0), Step::Wait, Step::HoverAt("cpu", 0.97), Step::Wait, Step::Shot("rewind-hover")]);
@@ -88,17 +106,17 @@ pub fn start(app: &AppWindow, dir: PathBuf) {
     steps.extend([Step::SpaceZoom(0), Step::Wait, Step::Wait, Step::Shot("space-zoom")]);
     steps.extend([Step::SpaceSelect(40, false), Step::SpaceSelect(60, true), Step::SpaceSelect(80, true), Step::Wait, Step::Shot("space-selected")]);
     steps.extend([Step::SpaceAskTrash, Step::Wait, Step::Shot("space-confirm"), Step::SpaceCancelTrash, Step::SpaceSelect(-1, false)]);
-    steps.extend([Step::Mode(1), Step::Wait, Step::Shot("space-light")]);
-    // Docker (feature builds): it ships disabled, so enable it from
-    // Settings → Tabs first, then shoot the tab — rows, the stop confirmation
+
+    // Docker (dark): the toggle is a global callback, so the tab is enabled
+    // without visiting Settings. Shots: the table, the stop confirmation
     // (opened and cancelled, never accepted), a collapsed header, a rename.
     #[cfg(feature = "docker")]
     {
-        steps.extend([Step::SettingsOpen(true), Step::SetToggle("tabs_docker", true)]);
+        // Generous waits: a slow/unreachable server blocks the first poll for
+        // up to its 4 s timeout per request.
+        steps.extend([Step::SetToggle("tabs_docker", true)]);
         steps.extend(std::iter::repeat_with(|| Step::Wait).take(8));
         steps.extend([Step::TabId("docker")]);
-        // Generous: a slow/unreachable server blocks the first poll for up to
-        // its 4 s timeout per request.
         steps.extend(std::iter::repeat_with(|| Step::Wait).take(14));
         steps.push(Step::Shot("docker"));
         steps.extend([Step::DockerAskStop, Step::Wait, Step::Shot("docker-confirm"), Step::DockerCancelStop]);
@@ -106,55 +124,35 @@ pub fn start(app: &AppWindow, dir: PathBuf) {
         steps.extend([Step::DockerToggleServer, Step::Wait, Step::Shot("docker-collapsed"), Step::DockerToggleServer]);
         // Rename the first server (persisted to the config, shown at once), then put it back.
         steps.extend([Step::DockerRenameServer("Tiny renamed"), Step::Wait, Step::Shot("docker-renamed"), Step::DockerRenameServer("Tiny")]);
-        // Off again from Settings: the tab disappears live.
-        steps.extend([
-            Step::SettingsOpen(true),
-            Step::SetToggle("tabs_docker", false),
-            Step::Wait,
-            Step::TabId("processes"),
-            Step::Wait,
-            Step::Shot("live-docker-off"),
-            Step::SettingsOpen(false),
-        ]);
+        // Off again: the tab disappears live and the view falls back to another tab.
+        steps.extend([Step::SetToggle("tabs_docker", false), Step::Wait, Step::Shot("live-docker-off")]);
     }
-    // Proxy tab (feature builds): ships disabled — enable it, see the connect
-    // form, then connect to a local npm-mock (only when no real connection is
-    // configured) and shoot the loaded table.
+
+    // Proxy (dark): the connect form, then the loaded table against a local
+    // npm-mock (skipped when a real connection is configured).
     #[cfg(feature = "proxy")]
     {
-        steps.extend([Step::SettingsOpen(true), Step::SetToggle("tabs_proxy", true)]);
-        steps.extend([Step::TabId("proxy"), Step::Wait, Step::Shot("proxy-connect")]);
+        steps.extend([Step::SetToggle("tabs_proxy", true), Step::TabId("proxy"), Step::Wait, Step::Shot("proxy-connect")]);
         if !crate::settings::get(|s| !s.npm_url.is_empty()) {
             steps.extend([Step::ProxyConnect("http://127.0.0.1:2381", "sophon@mock", "mockpass")]);
             steps.extend(std::iter::repeat_with(|| Step::Wait).take(6));
             steps.push(Step::Shot("proxy"));
         }
-        // Off again from Settings: defaults preserved.
-        steps.extend([
-            Step::SettingsOpen(true),
-            Step::SetToggle("tabs_proxy", false),
-            Step::Wait,
-            Step::TabId("processes"),
-            Step::Wait,
-            Step::Shot("live-proxy-off"),
-            Step::SettingsOpen(false),
-        ]);
+        steps.extend([Step::SetToggle("tabs_proxy", false), Step::Wait, Step::Shot("live-proxy-off")]);
     }
-    // Settings: every category. Settings is an overlay now — opened from the
-    // header's ☰ button, not the tab bar.
+
+    // Settings (dark): every category in one overlay visit.
     steps.push(Step::SettingsOpen(true));
-    // Change a few settings, then show the Processes tab to prove they apply live.
-    steps.extend([Step::SetChoice("density", 1), Step::SetChoice("graph_style", 3), Step::SetSlide("roundness", 0.2), Step::SetToggle("show_kernel", true)]);
-    steps.extend([Step::TabId("processes"), Step::Wait, Step::Shot("live-compact-bars"), Step::SettingsOpen(true)]);
-    // Reset them.
-    steps.extend([Step::SetChoice("density", 0), Step::SetChoice("graph_style", 0), Step::SetSlide("roundness", 1.0), Step::SetToggle("show_kernel", false)]);
     let setting_shots = ["settings-0", "settings-1", "settings-2", "settings-3", "settings-4", "settings-5", "settings-6", "settings-7-tabs"];
     for (i, name) in setting_shots.iter().enumerate() {
         steps.extend([Step::SettingsCategory(i as i32), Step::Wait, Step::Shot(name)]);
     }
-    steps.extend([Step::SettingsOpen(false)]);
-    steps.extend([Step::TabId("performance"), Step::Wait, Step::Mode(1), Step::Tile(0), Step::Wait, Step::Wait, Step::Shot("light-perf")]);
-    steps.extend([Step::TabId("processes"), Step::Wait, Step::Wait, Step::Shot("light-processes"), Step::Quit]);
+    steps.push(Step::SettingsOpen(false));
+
+    // Light mode: one switch, every light shot.
+    steps.extend([Step::Mode(1), Step::TabId("performance"), Step::Tile(0), Step::Wait, Step::Shot("light-perf")]);
+    steps.extend([Step::Tile(disk_tile), Step::Wait, Step::Shot("space-light")]);
+    steps.extend([Step::TabId("processes"), Step::Wait, Step::Shot("light-processes"), Step::Quit]);
 
     let weak = app.as_weak();
     let mut steps = steps.into_iter();
