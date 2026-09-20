@@ -54,7 +54,6 @@ export struct DockerRow {
     proxied-port: string,
     proxied-domain: string,
     proxied-url: string,
-    proxied-port: string,
     /// Container: the row is expanded (its detail panel shows). Server header:
     /// the server's containers are shown.
     expanded: bool,
@@ -477,7 +476,6 @@ component Cell inherits Rectangle {
         height: parent.height;
         padding-left: 2px;
         padding-right: 10px;
-        alignment: center;
         spacing: 6px;
         if root.item.proxied: StateDot {
             tint: Theme.gpu;

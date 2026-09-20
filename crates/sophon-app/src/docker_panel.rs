@@ -147,9 +147,11 @@ impl NpmCreds {
 #[cfg(feature = "proxy")]
 type NpmTarget = (String, String, u16, String);
 
-/// One poller delivery.
+/// One poller delivery: `states` is the fresh container list (the first poll
+/// of a cycle); `stats`/`details` follow separately so slow servers or stat
+/// requests never delay the table.
 struct Poll {
-    states: Vec<ServerState>,
+    states: Option<Vec<ServerState>>,
     stats: HashMap<String, Stats>,
     details: HashMap<String, Details>,
 }
@@ -329,7 +331,9 @@ fn apply(poll: Poll) {
         if !d.net.enabled.load(Relaxed) {
             return; // the tab was disabled mid-flight; drop the stale poll
         }
-        d.states = poll.states;
+        if let Some(states) = poll.states {
+            d.states = states;
+        }
         // Latest stats (for sorting) and expanded history (for graphs).
         for (id, s) in &poll.stats {
             d.latest.insert(id.clone(), *s);
@@ -427,42 +431,80 @@ fn poller(net: Arc<Net>, wake: mpsc::Receiver<()>) {
         let visible = net.visible.load(Relaxed);
         let expanded = if visible { net.expanded.lock().unwrap().clone() } else { HashSet::new() };
         let collapsed = net.collapsed.lock().unwrap().clone();
-        // Fetch all running containers' stats only to sort by usage, and only
-        // while the tab is visible — otherwise `list` alone keeps state fresh.
+
+        // 1. Lists, in parallel: containers appear as soon as the servers
+        //    answer — one slow server doesn't hold up the others, and nothing
+        //    below (stats, NPM) delays the table.
+        let mut states: Vec<ServerState> = Vec::new();
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = servers
+                .iter()
+                .map(|srv| {
+                    let srv = srv.clone();
+                    scope.spawn(move || {
+                        let result = sophon_docker::list(&srv);
+                        (srv, result)
+                    })
+                })
+                .collect();
+            for h in handles {
+                if let Ok((server, result)) = h.join() {
+                    states.push(match result {
+                        Ok(cs) => ServerState { server, error: None, containers: cs },
+                        Err(e) => ServerState { server, error: Some(e.to_string()), containers: Vec::new() },
+                    });
+                }
+            }
+        });
+        let listed = states.clone();
+        if slint::invoke_from_event_loop(move || {
+            apply(Poll { states: Some(listed), stats: HashMap::new(), details: HashMap::new() })
+        })
+        .is_err()
+        {
+            return;
+        }
+
+        // 2. Stats and inspect, after the table is on screen: the CPU/RAM
+        //    cells and expanded graphs fill in behind it.
         let sort_usage = visible && matches!(net.sort.load(Relaxed) as usize, 4 | 5);
         let mut stats = HashMap::new();
         let mut details = HashMap::new();
-        let mut states: Vec<ServerState> = Vec::new();
         for srv in &servers {
             // A collapsed header hides its containers; skip their stats.
             let srv_collapsed = collapsed.contains(&format!("{}:{}", srv.host, srv.port));
-            match sophon_docker::list(srv) {
-                Ok(cs) => {
-                    // The CPU/RAM columns: a rotating window of ~6 stat
-                    // requests per poll sweeps every running container over
-                    // several polls (one-shot stats cost a request each).
-                    let step = (cs.len() + 5) / 6;
-                    for (i, c) in cs.iter().enumerate() {
-                        if !c.running() {
-                            continue;
-                        }
-                        let in_window = !srv_collapsed && (i + tick) % step.max(1) == 0;
-                        let want_stats = expanded.contains(&c.id) || sort_usage || in_window;
-                        if want_stats && let Ok(s) = sophon_docker::stats(srv, &c.id) {
-                            stats.insert(c.id.clone(), s);
-                        }
-                        if expanded.contains(&c.id) && let Ok(dt) = sophon_docker::inspect(srv, &c.id) {
-                            details.insert(c.id.clone(), dt);
-                        }
-                    }
-                    states.push(ServerState { server: srv.clone(), error: None, containers: cs });
+            let Some(st) = states.iter().find(|st| st.server == *srv) else { continue };
+            if st.error.is_some() {
+                continue;
+            }
+            // A rotating window of ~6 stat requests per poll sweeps every
+            // running container over several polls (one-shot stats cost a
+            // request each).
+            let step = (st.containers.len() + 5) / 6;
+            for (i, c) in st.containers.iter().enumerate() {
+                if !c.running() {
+                    continue;
                 }
-                Err(e) => states.push(ServerState { server: srv.clone(), error: Some(e.to_string()), containers: Vec::new() }),
+                let in_window = !srv_collapsed && (i + tick) % step.max(1) == 0;
+                let want_stats = expanded.contains(&c.id) || sort_usage || in_window;
+                if want_stats && let Ok(s) = sophon_docker::stats(srv, &c.id) {
+                    stats.insert(c.id.clone(), s);
+                }
+                if expanded.contains(&c.id) && let Ok(dt) = sophon_docker::inspect(srv, &c.id) {
+                    details.insert(c.id.clone(), dt);
+                }
             }
         }
-        // The Proxied column (feature "proxy"): refresh the NPM host list
-        // while the tab is visible — immediately, then every ~30 s (NPM hosts
-        // change rarely). Errors stay silent; the Proxy tab reports those.
+        if (!stats.is_empty() || !details.is_empty())
+            && slint::invoke_from_event_loop(move || apply(Poll { states: None, stats, details })).is_err()
+        {
+            return;
+        }
+
+        // 3. The Proxied column's NPM data (feature "proxy"), last so it can
+        //    never delay the table. Refreshed while visible — immediately,
+        //    then every ~30 s (NPM hosts change rarely). Errors stay silent;
+        //    the Proxy tab reports those.
         #[cfg(feature = "proxy")]
         if net.visible.load(Relaxed) && (!npm_ok || tick % 15 == 0) {
             let creds = net.npm.lock().unwrap().clone();
@@ -479,10 +521,7 @@ fn poller(net: Arc<Net>, wake: mpsc::Receiver<()>) {
             }
         }
         tick = tick.wrapping_add(1);
-        if slint::invoke_from_event_loop(move || apply(Poll { states, stats, details })).is_err() {
-            return;
-        }
-        let interval = if net.visible.load(Relaxed) { POLL_VISIBLE } else { POLL_HIDDEN };
+        let interval = if visible { POLL_VISIBLE } else { POLL_HIDDEN };
         let deadline = Instant::now() + interval;
         match wake.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
             Ok(()) => {}
