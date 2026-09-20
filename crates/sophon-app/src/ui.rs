@@ -214,8 +214,8 @@ pub fn install(app: &AppWindow, shared: Arc<Shared>) {
             }
         });
     });
-    app.on_column_dropped(|col, frac| {
-        with(|ui| ui.drop_column(col, frac));
+    app.on_column_dropped(|col, x, w| {
+        with(|ui| ui.drop_column(col, x, w));
     });
     app.on_column_resized(|col, width| {
         if let Some(&(id, ..)) = COLUMNS.get(col.max(0) as usize) {
@@ -1626,15 +1626,16 @@ impl Ui {
     }
 
     /// A column header was dragged and dropped at `frac` of the header width.
-    fn drop_column(&mut self, col: i32, frac: f32) {
-        let Some(app) = self.app.upgrade() else { return };
+    /// A column header was dragged and dropped at `x` of a header `header_w`
+    /// wide (both in header coordinates — no window-size guessing).
+    fn drop_column(&mut self, col: i32, x: f32, header_w: f32) {
         let Some(&(id, ..)) = COLUMNS.get(col.max(0) as usize) else { return };
-        let width = app.window().size().width as f32 / app.window().scale_factor();
-        let x = frac * width;
+        let id = id.to_string();
         let prefs = settings::get(|s| s.clone());
-        // Left edges of visible columns, in the same coordinates.
+        // Column centres in header coordinates: the columns stack
+        // right-to-left from the scrollbar gutter.
         let visible = Self::visible_columns(&prefs);
-        let right_edge = width - 14.0 - if app.get_has_detail() { 360.0 } else { 0.0 };
+        let right_edge = header_w - 14.0;
         let mut from_right = 0f32;
         let mut centers: Vec<(String, f32)> = Vec::new();
         for &(i, w) in visible.iter().rev() {
@@ -1642,17 +1643,8 @@ impl Ui {
             centers.push((COLUMNS[i].0.to_string(), right_edge - from_right + w as f32 / 2.0));
         }
         centers.reverse();
-        let target = centers.iter().filter(|(c, _)| c != id).position(|(_, cx)| x < *cx);
-        settings::update(|s| {
-            s.columns.retain(|c| c != id);
-            let others: Vec<String> = centers.iter().map(|(c, _)| c.clone()).filter(|c| c != id).collect();
-            // Insert before the column we were dropped left of, keeping hidden columns in place.
-            let pos = match target.and_then(|t| others.get(t)) {
-                Some(before) => s.columns.iter().position(|c| c == before).unwrap_or(s.columns.len()),
-                None => others.last().and_then(|l| s.columns.iter().position(|c| c == l)).map_or(s.columns.len(), |p| p + 1),
-            };
-            s.columns.insert(pos, id.to_string());
-        });
+        let new_order = crate::panels::reorder_after_drop(&prefs.columns, &id, x, &centers);
+        settings::update(|s| s.columns = new_order);
         self.render_processes();
         crate::settings_page::refresh();
     }

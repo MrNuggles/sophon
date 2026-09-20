@@ -201,8 +201,8 @@ pub fn install(app: &AppWindow) {
     g.on_sort_by(|key| {
         with(|d| d.set_sort(key.max(0) as usize));
     });
-    g.on_column_dropped(|col, frac| {
-        with(|d| d.column_dropped(col, frac));
+    g.on_column_dropped(|key, x, w| {
+        with(|d| d.column_dropped(key, x, w));
     });
     g.on_columns_reset(|| {
         with(|d| {
@@ -473,32 +473,21 @@ impl DockerUi {
         render_rows(self);
     }
 
-    /// A header was dragged and dropped at `frac` of the header width.
-    fn column_dropped(&mut self, col: i32, frac: f32) {
-        let Some(app) = self.app.upgrade() else { return };
+    /// A header was dragged and dropped at `x` of a header `header_w` wide
+    /// (both in header coordinates — no window-size guessing).
+    fn column_dropped(&mut self, key: i32, x: f32, header_w: f32) {
         let order: Vec<String> = settings::get(|s| s.docker_cols.clone());
-        let Some(id) = order.get(col.max(0) as usize).cloned() else { return };
-        let width = app.window().size().width as f32 / app.window().scale_factor();
-        let x = frac * width;
-        // Column centres, in the same coordinates as the drop point.
+        let Some(id) = order.get(key.max(0) as usize).cloned() else { return };
+        // Column centres, in the same header coordinates as the drop point.
         let centers: Vec<(String, f32)> = layout()
             .into_iter()
             .map(|(cid, _, _, r, w, flex)| {
-                let cx = if flex { 12.0 + (width - r - 12.0) / 2.0 } else { width - r + w / 2.0 };
+                let cx = if flex { 12.0 + (header_w - r - 12.0) / 2.0 } else { header_w - r + w / 2.0 };
                 (cid, cx)
             })
             .collect();
-        let target = centers.iter().filter(|(c, _)| c != &id).position(|(_, cx)| x < *cx);
-        settings::update(|s| {
-            s.docker_cols.retain(|c| c != &id);
-            let others: Vec<String> = centers.iter().map(|(c, _)| c.clone()).filter(|c| c != &id).collect();
-            // Insert before the column it was dropped left of.
-            let pos = match target.and_then(|t| others.get(t)) {
-                Some(before) => s.docker_cols.iter().position(|c| c == before).unwrap_or(s.docker_cols.len()),
-                None => s.docker_cols.len(),
-            };
-            s.docker_cols.insert(pos, id);
-        });
+        let new_order = crate::panels::reorder_after_drop(&order, &id, x, &centers);
+        settings::update(|s| s.docker_cols = new_order);
         render_rows(self);
     }
 
@@ -622,7 +611,14 @@ fn self_sort(cs: &mut [&Container], sort: usize, desc: bool, latest: &HashMap<St
 }
 
 fn container_row(c: &Container, server: usize, expanded: bool, stat: Option<&Stats>) -> DockerRow {
-    let ports = c.ports.iter().map(|p| format!("{}→{}/{}", p.public, p.private, p.proto)).collect::<Vec<_>>().join("  ");
+    // Ports stack one per line; longer lists show the first two + a count.
+    let ports_list: Vec<String> =
+        c.ports.iter().map(|p| format!("{}→{}/{}", p.public, p.private, p.proto)).collect();
+    let ports = match ports_list.len() {
+        0 => String::new(),
+        1..=3 => ports_list.join("\n"),
+        n => format!("{}\n+{} more", ports_list[..2].join("\n"), n - 2),
+    };
     DockerRow {
         kind: 1,
         server: server as i32,
@@ -677,7 +673,7 @@ fn detail_row(c: &Container, server: usize, d: &DockerUi) -> DockerRow {
     } else if c.running() {
         kv("Details", "loading…".into());
     }
-    let all_ports = c.ports.iter().map(|p| format!("{}→{}/{}", p.public, p.private, p.proto)).collect::<Vec<_>>().join("    ");
+    let all_ports = c.ports.iter().map(|p| format!("{}→{}/{}", p.public, p.private, p.proto)).collect::<Vec<_>>().join("\n");
     kv("Published ports", if all_ports.is_empty() { "none".into() } else { all_ports });
 
     DockerRow {

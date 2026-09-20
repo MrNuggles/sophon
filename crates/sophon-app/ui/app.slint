@@ -97,7 +97,7 @@ export component AppWindow inherits Window {
     callback tile-changed(int);
     callback tile-action(int, string);
     callback delete-pressed(bool);
-    callback column-dropped(int, float);
+    callback column-dropped(int, length, length);
     callback column-resized(int, float);
     callback column-hide(int);
     callback confirm-accepted();
@@ -243,8 +243,8 @@ export component AppWindow inherits Window {
                 sort-desc: root.sort-desc;
                 grouping <=> root.grouping;
                 heads: root.heads;
-                column-dropped(c, f) => {
-                    root.column-dropped(c, f);
+                column-dropped(c, x, w) => {
+                    root.column-dropped(c, x, w);
                 }
                 column-resized(c, w) => {
                     root.column-resized(c, w);

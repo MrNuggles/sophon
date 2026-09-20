@@ -64,8 +64,8 @@ export global DockerPage {
     callback add-server(string, string);
     /// Sort by the column with this canonical id.
     callback sort-by(int);
-    /// Column `col` dropped at a fraction of the header width.
-    callback column-dropped(int, float);
+    /// Column `key` dropped at `x` of a header `width` wide.
+    callback column-dropped(int, length, length);
     callback columns-reset();
     /// Expand or collapse a container by id.
     callback toggle(string);
@@ -663,7 +663,7 @@ export component DockerView inherits Rectangle {
                                     DockerPage.sort-by(h.key);
                                 }
                                 dropped(x) => {
-                                    DockerPage.column-dropped(h.key, x / header.width);
+                                    DockerPage.column-dropped(h.key, x, header.width);
                                 }
                             }
                         }

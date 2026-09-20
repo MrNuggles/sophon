@@ -98,3 +98,72 @@ pub fn set_visible(id: &str) {
         t.set_visible(t.id() == id);
     }
 }
+
+/// New column order after dragging column `drag` and dropping it at `x`.
+/// `centers` holds every other column's centre in the same coordinates as
+/// `x` (both in header pixels). Columns that aren't in `centers` (hidden
+/// ones) keep their relative position.
+pub fn reorder_after_drop(order: &[String], drag: &str, x: f32, centers: &[(String, f32)]) -> Vec<String> {
+    let mut out: Vec<String> = order.iter().filter(|c| c.as_str() != drag).cloned().collect();
+    // Land immediately after the last surviving column centred left of the
+    // drop point (or at the start if none is).
+    let pos = match centers.iter().filter(|(c, cx)| c.as_str() != drag && *cx <= x).last() {
+        Some((before, _)) => out.iter().position(|c| c == before).map_or(out.len(), |p| p + 1),
+        None => 0,
+    };
+    out.insert(pos.min(out.len()), drag.to_string());
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn centers(v: &[(&str, f32)]) -> Vec<(String, f32)> {
+        v.iter().map(|(c, x)| (c.to_string(), *x)).collect()
+    }
+
+    #[test]
+    fn drop_moves_the_column() {
+        let order = vec!["a".into(), "b".into(), "c".into()];
+        let cs = centers(&[("a", 100.0), ("b", 300.0), ("c", 500.0)]);
+        // Drag "c" to the far left: before "a".
+        assert_eq!(reorder_after_drop(&order, "c", 0.0, &cs), vec!["c", "a", "b"]);
+        // Drag "a" to the far right: after "c".
+        assert_eq!(reorder_after_drop(&order, "a", 600.0, &cs), vec!["b", "c", "a"]);
+        // Drag "b" left of "a"'s centre.
+        assert_eq!(reorder_after_drop(&order, "b", 50.0, &cs), vec!["b", "a", "c"]);
+    }
+
+    #[test]
+    fn drop_on_its_own_centre_is_a_noop() {
+        let order = vec!["a".into(), "b".into(), "c".into()];
+        let cs = centers(&[("a", 100.0), ("b", 300.0), ("c", 500.0)]);
+        // "b" dropped exactly on "b": target is "c" (b excluded), lands before
+        // "c" — i.e. back where it was.
+        assert_eq!(reorder_after_drop(&order, "b", 300.0, &cs), vec!["a", "b", "c"]);
+        // Between "a" and "b" is also a no-op for "b".
+        assert_eq!(reorder_after_drop(&order, "b", 200.0, &cs), vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn hidden_columns_keep_their_relative_position() {
+        // "h" is hidden (not in centres); dragging "c" before "a" must not
+        // disturb it, and a far-right drop lands after the last visible
+        // column ("b"), before the hidden one.
+        let order = vec!["a".into(), "h".into(), "b".into(), "c".into()];
+        let cs = centers(&[("a", 100.0), ("b", 300.0)]);
+        assert_eq!(reorder_after_drop(&order, "c", 0.0, &cs), vec!["c", "a", "h", "b"]);
+        assert_eq!(reorder_after_drop(&order, "a", 600.0, &cs), vec!["h", "b", "a", "c"]);
+    }
+
+    #[test]
+    fn boundaries_are_clamped() {
+        let order = vec!["a".into(), "b".into()];
+        let cs = centers(&[("a", 100.0), ("b", 300.0)]);
+        // Negative x: still lands at the start.
+        assert_eq!(reorder_after_drop(&order, "b", -50.0, &cs), vec!["b", "a"]);
+        // No centres at all (single column): unchanged.
+        assert_eq!(reorder_after_drop(&order, "a", 100.0, &[]), vec!["a", "b"]);
+    }
+}

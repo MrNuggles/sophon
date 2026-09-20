@@ -766,8 +766,8 @@ export component ProcessesView inherits Rectangle {
     callback detail-action(string);
     callback close-detail();
     callback focus-table();
-    /// Column `col` dropped at a fraction of the header width.
-    callback column-dropped(int, float);
+    /// Column `col` dropped at `x` of a header `width` wide.
+    callback column-dropped(int, length, length);
     callback column-resized(int, float);
     /// Hide column `col`; -1 shows all, -2 resets order and widths.
     callback column-hide(int);
@@ -864,7 +864,7 @@ export component ProcessesView inherits Rectangle {
                         }
                     }
                     dropped(x) => {
-                        root.column-dropped(h.col, x / header.width);
+                        root.column-dropped(h.col, x, header.width);
                     }
                     resized(w) => {
                         root.column-resized(h.col, w / 1px);
