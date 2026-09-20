@@ -46,8 +46,10 @@ export struct DockerRow {
     status: string,
     ports: string,
     running: bool,
-    /// Reverse-proxied through the user's NPM (feature "proxy").
+    /// Reverse-proxied through the user's NPM, with the forward port
+    /// (feature "proxy").
     proxied: bool,
+    proxied-port: string,
     /// Container: the row is expanded (its detail panel shows). Server header:
     /// the server's containers are shown.
     expanded: bool,
@@ -466,13 +468,17 @@ component Cell inherits Rectangle {
     }
     if root.head.key == 6: HorizontalLayout {
         alignment: center;
+        spacing: 6px;
         if root.item.proxied: StateDot {
             tint: Theme.gpu;
         }
-        if !root.item.proxied: Text {
-            text: "—";
+        if root.item.proxied: Text {
+            text: root.item.proxied-port;
             font-size: 12px * Theme.font-scale;
-            color: Theme.faint;
+            color: Theme.text;
+        }
+        if !root.item.proxied: StateDot {
+            tint: Theme.danger;
         }
     }
 }
@@ -483,78 +489,80 @@ component ContainerRow inherits Rectangle {
     callback toggle();
     height: 48px;
     background: root.item.expanded ? Theme.surface-2 : ta.has-hover ? Theme.hover : transparent;
+    // The row's TouchArea wraps everything (menu, cells, action buttons):
+    // hovering the buttons keeps it hovered, so the action strip can't flicker.
     ta := TouchArea {
         clicked => {
             root.toggle();
         }
-    }
-    ContextMenuArea {
-        Menu {
-            MenuItem {
-                title: root.item.running ? "Restart" : "Start";
-                activated => {
-                    root.act(root.item.running ? "restart" : "start");
-                }
-            }
-            MenuItem {
-                title: "Stop";
-                activated => {
-                    root.act("stop");
-                }
-            }
-        }
-        Rectangle {
-            for h in DockerPage.heads: Cell {
-                head: h;
-                item: root.item;
-                x: h.flex ? 12px : parent.width - h.r;
-                width: h.flex ? parent.width - h.r - 12px : h.w;
-                height: parent.height;
-            }
-        }
-        // Row actions on hover (Task-manager style), over the right edge.
-        if ta.has-hover && root.item.running: Rectangle {
-            x: parent.width - 122px;
-            width: 116px;
-            height: parent.height;
-            background: Theme.surface.with-alpha(0.92);
-            HorizontalLayout {
-                padding: 6px;
-                spacing: 4px;
-                alignment: center;
-                ActionBtn {
-                    icon: "M 5 5 L 12 12 M 12 12 L 5 19 M 19 5 A 10 10 0 0 1 19 19";
-                    tip: "Restart";
-                    tint: Theme.cpu;
-                    clicked => {
-                        root.act("restart");
+        ContextMenuArea {
+            Menu {
+                MenuItem {
+                    title: root.item.running ? "Restart" : "Start";
+                    activated => {
+                        root.act(root.item.running ? "restart" : "start");
                     }
                 }
-                ActionBtn {
-                    icon: "M 7 7 L 17 7 L 17 17 L 7 17 Z";
-                    tip: "Stop";
-                    tint: Theme.danger;
-                    clicked => {
+                MenuItem {
+                    title: "Stop";
+                    activated => {
                         root.act("stop");
                     }
                 }
             }
-        }
-        if ta.has-hover && !root.item.running: Rectangle {
-            x: parent.width - 122px;
-            width: 116px;
-            height: parent.height;
-            background: Theme.surface.with-alpha(0.92);
-            HorizontalLayout {
-                padding: 6px;
-                spacing: 4px;
-                alignment: center;
-                ActionBtn {
-                    icon: "M 7 5 L 19 12 L 7 19 Z";
-                    tip: "Start";
-                    tint: Theme.gpu;
-                    clicked => {
-                        root.act("start");
+            Rectangle {
+                for h in DockerPage.heads: Cell {
+                    head: h;
+                    item: root.item;
+                    x: h.flex ? 12px : parent.width - h.r;
+                    width: h.flex ? parent.width - h.r - 12px : h.w;
+                    height: parent.height;
+                }
+            }
+            // Row actions on hover (Task-manager style), over the right edge.
+            if ta.has-hover && root.item.running: Rectangle {
+                x: parent.width - 122px;
+                width: 116px;
+                height: parent.height;
+                background: Theme.surface.with-alpha(0.92);
+                HorizontalLayout {
+                    padding: 6px;
+                    spacing: 4px;
+                    alignment: center;
+                    ActionBtn {
+                        icon: "M 5 5 L 12 12 M 12 12 L 5 19 M 19 5 A 10 10 0 0 1 19 19";
+                        tip: "Restart";
+                        tint: Theme.cpu;
+                        clicked => {
+                            root.act("restart");
+                        }
+                    }
+                    ActionBtn {
+                        icon: "M 7 7 L 17 7 L 17 17 L 7 17 Z";
+                        tip: "Stop";
+                        tint: Theme.danger;
+                        clicked => {
+                            root.act("stop");
+                        }
+                    }
+                }
+            }
+            if ta.has-hover && !root.item.running: Rectangle {
+                x: parent.width - 122px;
+                width: 116px;
+                height: parent.height;
+                background: Theme.surface.with-alpha(0.92);
+                HorizontalLayout {
+                    padding: 6px;
+                    spacing: 4px;
+                    alignment: center;
+                    ActionBtn {
+                        icon: "M 7 5 L 19 12 L 7 19 Z";
+                        tip: "Start";
+                        tint: Theme.gpu;
+                        clicked => {
+                            root.act("start");
+                        }
                     }
                 }
             }

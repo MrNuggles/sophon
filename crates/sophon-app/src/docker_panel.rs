@@ -379,23 +379,25 @@ fn apply_npm(targets: Vec<NpmTarget>) {
     });
 }
 
-/// The NPM domains that reverse-proxy this container: a target matches when
-/// it points at the container's own server and one of the container's
-/// published ports (localhost targets were already resolved to the NPM host).
+/// The NPM domains that reverse-proxy this container, with their forward
+/// ports: a target matches when it points at the container's own server and
+/// one of the container's published ports (localhost targets were already
+/// resolved to the NPM host).
 #[cfg(feature = "proxy")]
-fn proxied_domains(d: &DockerUi, server_host: &str, c: &Container) -> Vec<String> {
+fn proxied_matches(d: &DockerUi, server_host: &str, c: &Container) -> Vec<(String, u16)> {
     if d.npm.is_empty() {
         return Vec::new();
     }
     d.npm
         .iter()
-        .filter(|(h, port, _)| h == server_host && c.ports.iter().any(|p| p.public == *port))
-        .map(|(_, _, dom)| dom.clone())
+        .filter_map(|(h, port, dom)| {
+            (h == server_host && c.ports.iter().any(|p| p.public == *port)).then(|| (dom.clone(), *port))
+        })
         .collect()
 }
 
 #[cfg(not(feature = "proxy"))]
-fn proxied_domains(_d: &DockerUi, _server_host: &str, _c: &Container) -> Vec<String> {
+fn proxied_matches(_d: &DockerUi, _server_host: &str, _c: &Container) -> Vec<(String, u16)> {
     Vec::new()
 }
 
@@ -719,12 +721,15 @@ fn render_rows(d: &mut DockerUi) {
         });
         let mut cs: Vec<&Container> = st.containers.iter().collect();
         #[cfg(feature = "proxy")]
-        let proxied: HashMap<String, bool> = cs
+        let proxied: HashMap<String, u16> = cs
             .iter()
-            .map(|c| (c.id.clone(), !proxied_domains(d, &st.server.host, c).is_empty()))
+            .map(|c| {
+                let port = proxied_matches(d, &st.server.host, c).iter().map(|(_, p)| *p).min().unwrap_or(0);
+                (c.id.clone(), port)
+            })
             .collect();
         #[cfg(not(feature = "proxy"))]
-        let proxied: HashMap<String, bool> = HashMap::new();
+        let proxied: HashMap<String, u16> = HashMap::new();
         self_sort(&mut cs, d.sort, d.sort_desc, &d.latest, &proxied);
         for c in cs {
             // The summary counts every server's containers, shown or not.
@@ -736,10 +741,12 @@ fn render_rows(d: &mut DockerUi) {
                 continue;
             }
             let is_open = d.expanded.contains(&c.id);
-            let domains = proxied_domains(d, &st.server.host, c);
-            rows.push(container_row(c, i, is_open, d.latest.get(&c.id), !domains.is_empty()));
+            let matches = proxied_matches(d, &st.server.host, c);
+            let proxied_port = matches.iter().map(|(_, p)| *p).min().unwrap_or(0);
+            rows.push(container_row(c, i, is_open, d.latest.get(&c.id), proxied_port));
             if is_open {
-                rows.push(detail_row(c, i, d, &domains.join(", ")));
+                let by = matches.iter().map(|(d, p)| format!("{d} (:{p})")).collect::<Vec<_>>().join(", ");
+                rows.push(detail_row(c, i, d, &by));
             }
         }
     }
@@ -762,11 +769,11 @@ fn render_rows(d: &mut DockerUi) {
 }
 
 /// Sorts a server's containers by the chosen key.
-fn self_sort(cs: &mut [&Container], sort: usize, desc: bool, latest: &HashMap<String, Stats>, proxied: &HashMap<String, bool>) {
+fn self_sort(cs: &mut [&Container], sort: usize, desc: bool, latest: &HashMap<String, Stats>, proxied: &HashMap<String, u16>) {
     use std::cmp::Ordering;
     let cpu = |c: &Container| latest.get(&c.id).map_or(0.0, |s| s.cpu_pct);
     let mem = |c: &Container| latest.get(&c.id).map_or(0, |s| s.mem_used);
-    let prox = |c: &Container| proxied.get(&c.id).copied().unwrap_or(false);
+    let prox = |c: &Container| proxied.get(&c.id).copied().unwrap_or(0);
     cs.sort_by(|a, b| {
         let o = match sort {
             0 => a.lowest_port().cmp(&b.lowest_port()),
@@ -783,7 +790,7 @@ fn self_sort(cs: &mut [&Container], sort: usize, desc: bool, latest: &HashMap<St
     });
 }
 
-fn container_row(c: &Container, server: usize, expanded: bool, stat: Option<&Stats>, proxied: bool) -> DockerRow {
+fn container_row(c: &Container, server: usize, expanded: bool, stat: Option<&Stats>, proxied_port: u16) -> DockerRow {
     // Ports stack one per line; longer lists show the first two + a count.
     let ports_list: Vec<String> =
         c.ports.iter().map(|p| format!("{}→{}/{}", p.public, p.private, p.proto)).collect();
@@ -804,7 +811,8 @@ fn container_row(c: &Container, server: usize, expanded: bool, stat: Option<&Sta
         ports: ports.into(),
         running: c.running(),
         expanded,
-        proxied,
+        proxied: proxied_port > 0,
+        proxied_port: if proxied_port > 0 { format!(":{proxied_port}") } else { String::new() }.into(),
         cpu_text: stat.map_or_else(|| "—".into(), |s| format!("{:.1}%", s.cpu_pct)).into(),
         mem_text: stat.map_or_else(|| "—".into(), |s| fmt::bytes_short(s.mem_used)).into(),
         ..Default::default()
