@@ -39,7 +39,7 @@ const COLS: [(&str, &str, f32); 7] = [
     ("age", "Age", 160.0),
     ("cpu", "CPU", 64.0),
     ("ram", "RAM", 92.0),
-    ("proxied", "Proxied", 70.0),
+    ("proxied", "Proxied", 190.0),
 ];
 #[cfg(not(feature = "proxy"))]
 const COLS: [(&str, &str, f32); 6] = [
@@ -142,9 +142,10 @@ impl NpmCreds {
     }
 }
 
-/// One NPM reverse-proxy target: (forward host, forward port, domain).
+/// One NPM reverse-proxy target, resolved: (server host it points at, the
+/// public URL, the published port it forwards to, the domain).
 #[cfg(feature = "proxy")]
-type NpmTarget = (String, u16, String);
+type NpmTarget = (String, String, u16, String);
 
 /// One poller delivery.
 struct Poll {
@@ -157,7 +158,9 @@ struct DockerUi {
     app: slint::Weak<AppWindow>,
     net: Arc<Net>,
     states: Vec<ServerState>,
-    server_count: usize,
+    /// The configured servers, in settings order — rendered even before the
+    /// first poll lands (as "Connecting…" headers).
+    servers: Vec<Server>,
     expanded: HashSet<String>,
     /// Server addresses (host:port) whose containers are hidden.
     collapsed: HashSet<String>,
@@ -217,7 +220,7 @@ pub fn install(app: &AppWindow) {
         app: app.as_weak(),
         net: net.clone(),
         states: Vec::new(),
-        server_count: servers.len(),
+        servers: servers.clone(),
         expanded: HashSet::new(),
         collapsed: HashSet::new(),
         sort,
@@ -267,6 +270,9 @@ pub fn install(app: &AppWindow) {
     });
     g.on_column_resized(|id, w| {
         with(|d| d.column_resized(&id, w));
+    });
+    g.on_open_proxied(|url| {
+        crate::actions::open_url(&url);
     });
 
     std::thread::Builder::new().name("docker".into()).spawn(move || poller(net, rx)).ok();
@@ -363,8 +369,9 @@ fn npm_fetch(creds: &NpmCreds, token: &mut Option<String>) -> Result<Vec<NpmTarg
     for h in &hosts {
         let local = matches!(h.forward_host.as_str(), "127.0.0.1" | "localhost" | "::1");
         let host = if local { creds.server.host.clone() } else { h.forward_host.clone() };
+        let scheme = if h.forward_scheme.is_empty() { "https" } else { h.forward_scheme.as_str() };
         for d in &h.domains {
-            out.push((host.clone(), h.forward_port, d.clone()));
+            out.push((host.clone(), format!("{scheme}://{d}"), h.forward_port, d.clone()));
         }
     }
     Ok(out)
@@ -380,24 +387,24 @@ fn apply_npm(targets: Vec<NpmTarget>) {
 }
 
 /// The NPM domains that reverse-proxy this container, with their forward
-/// ports: a target matches when it points at the container's own server and
-/// one of the container's published ports (localhost targets were already
-/// resolved to the NPM host).
+/// port and public URL: a target matches when it points at the container's
+/// own server and one of the container's published ports (localhost targets
+/// were already resolved to the NPM host).
 #[cfg(feature = "proxy")]
-fn proxied_matches(d: &DockerUi, server_host: &str, c: &Container) -> Vec<(String, u16)> {
+fn proxied_matches(d: &DockerUi, server_host: &str, c: &Container) -> Vec<(String, u16, String)> {
     if d.npm.is_empty() {
         return Vec::new();
     }
     d.npm
         .iter()
-        .filter_map(|(h, port, dom)| {
-            (h == server_host && c.ports.iter().any(|p| p.public == *port)).then(|| (dom.clone(), *port))
+        .filter_map(|(h, url, port, dom)| {
+            (h == server_host && c.ports.iter().any(|p| p.public == *port)).then(|| (dom.clone(), *port, url.clone()))
         })
         .collect()
 }
 
 #[cfg(not(feature = "proxy"))]
-fn proxied_matches(_d: &DockerUi, _server_host: &str, _c: &Container) -> Vec<(String, u16)> {
+fn proxied_matches(_d: &DockerUi, _server_host: &str, _c: &Container) -> Vec<(String, u16, String)> {
     Vec::new()
 }
 
@@ -674,8 +681,8 @@ impl DockerUi {
 
     fn reload_servers(&mut self) {
         let servers = load_servers();
-        self.server_count = servers.len();
-        *self.net.servers.lock().unwrap() = servers;
+        *self.net.servers.lock().unwrap() = servers.clone();
+        self.servers = servers;
         let _ = self.net.wake.send(());
         render_rows(self);
     }
@@ -701,30 +708,40 @@ fn render_rows(d: &mut DockerUi) {
     let g = app.global::<DockerPage>();
     let mut rows: Vec<DockerRow> = Vec::new();
     let (mut total, mut running) = (0usize, 0usize);
-    for (i, st) in d.states.iter().enumerate() {
-        let open = !d.collapsed.contains(&server_key(&st.server));
-        let status = match &st.error {
-            Some(e) => e.clone(),
-            None => {
-                let r = st.containers.iter().filter(|c| c.running()).count();
-                format!("{} of {} running   ·   {}:{}", r, st.containers.len(), st.server.host, st.server.port)
-            }
+    // Render from the CONFIGURED servers: each one shows a header immediately
+    // ("Connecting…" until its first poll lands), so opening the tab never
+    // looks blank or ambiguous.
+    for (i, server) in d.servers.iter().enumerate() {
+        let key = server_key(server);
+        let open = !d.collapsed.contains(&key);
+        let state = d.states.iter().find(|st| server_key(&st.server) == key);
+        let status = match state {
+            Some(st) => match &st.error {
+                Some(e) => e.clone(),
+                None => {
+                    let r = st.containers.iter().filter(|c| c.running()).count();
+                    format!("{} of {} running   ·   {}:{}", r, st.containers.len(), st.server.host, st.server.port)
+                }
+            },
+            None => "Connecting…".to_string(),
         };
         rows.push(DockerRow {
             kind: 0,
             server: i as i32,
-            name: st.server.name.as_str().into(),
+            name: server.name.as_str().into(),
             server_status: status.into(),
-            server_error: st.error.is_some(),
+            server_error: state.map_or(false, |st| st.error.is_some()),
+            pending: state.is_none(),
             expanded: open,
             ..Default::default()
         });
+        let Some(st) = state else { continue };
         let mut cs: Vec<&Container> = st.containers.iter().collect();
         #[cfg(feature = "proxy")]
         let proxied: HashMap<String, u16> = cs
             .iter()
             .map(|c| {
-                let port = proxied_matches(d, &st.server.host, c).iter().map(|(_, p)| *p).min().unwrap_or(0);
+                let port = proxied_matches(d, &st.server.host, c).iter().map(|(_, p, _)| *p).min().unwrap_or(0);
                 (c.id.clone(), port)
             })
             .collect();
@@ -742,30 +759,27 @@ fn render_rows(d: &mut DockerUi) {
             }
             let is_open = d.expanded.contains(&c.id);
             let matches = proxied_matches(d, &st.server.host, c);
-            let proxied_port = matches.iter().map(|(_, p)| *p).min().unwrap_or(0);
-            rows.push(container_row(c, i, is_open, d.latest.get(&c.id), proxied_port));
+            let proxied = matches.first().map(|(dom, p, url)| (*p, dom.clone(), url.clone()));
+            rows.push(container_row(c, i, is_open, d.latest.get(&c.id), proxied.as_ref()));
             if is_open {
-                let by = matches.iter().map(|(d, p)| format!("{d} (:{p})")).collect::<Vec<_>>().join(", ");
+                let by = matches.iter().map(|(dom, _, p)| format!("{dom} (:{p})")).collect::<Vec<_>>().join(", ");
                 rows.push(detail_row(c, i, d, &by));
             }
         }
     }
-    update_model(&d.rows, rows);
-
-    // Configured/summary reflect whether SERVERS are set up, not whether a poll
-    // has landed yet — so it never says "No servers yet" while connected.
-    let configured = d.server_count > 0;
+    let configured = !d.servers.is_empty();
     g.set_configured(configured);
     g.set_summary(
         if !configured {
             "No servers yet".into()
         } else if d.states.is_empty() {
-            format!("Connecting to {} server{}…", d.server_count, plural(d.server_count))
+            format!("Connecting to {} server{}…", d.servers.len(), plural(d.servers.len()))
         } else {
             format!("{running} of {total} containers running across {} server{}", d.states.len(), plural(d.states.len()))
         }
         .into(),
     );
+    update_model(&d.rows, rows);
 }
 
 /// Sorts a server's containers by the chosen key.
@@ -790,7 +804,13 @@ fn self_sort(cs: &mut [&Container], sort: usize, desc: bool, latest: &HashMap<St
     });
 }
 
-fn container_row(c: &Container, server: usize, expanded: bool, stat: Option<&Stats>, proxied_port: u16) -> DockerRow {
+fn container_row(
+    c: &Container,
+    server: usize,
+    expanded: bool,
+    stat: Option<&Stats>,
+    proxied: Option<&(u16, String, String)>,
+) -> DockerRow {
     // Ports stack one per line; longer lists show the first two + a count.
     let ports_list: Vec<String> =
         c.ports.iter().map(|p| format!("{}→{}/{}", p.public, p.private, p.proto)).collect();
@@ -811,8 +831,10 @@ fn container_row(c: &Container, server: usize, expanded: bool, stat: Option<&Sta
         ports: ports.into(),
         running: c.running(),
         expanded,
-        proxied: proxied_port > 0,
-        proxied_port: if proxied_port > 0 { format!(":{proxied_port}") } else { String::new() }.into(),
+        proxied: proxied.is_some(),
+        proxied_port: proxied.map_or_else(String::new, |(p, _, _)| format!(":{p}")).into(),
+        proxied_domain: proxied.map_or_else(String::new, |(_, d, _)| d.clone()).into(),
+        proxied_url: proxied.map_or_else(String::new, |(_, _, u)| u.clone()).into(),
         cpu_text: stat.map_or_else(|| "—".into(), |s| format!("{:.1}%", s.cpu_pct)).into(),
         mem_text: stat.map_or_else(|| "—".into(), |s| fmt::bytes_short(s.mem_used)).into(),
         ..Default::default()

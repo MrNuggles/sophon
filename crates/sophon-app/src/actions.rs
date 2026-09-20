@@ -95,3 +95,14 @@ pub fn open_location(path: &str) -> bool {
     let dir = std::path::Path::new(path).parent().map_or("/".into(), |d| d.to_string_lossy().into_owned());
     Command::new("xdg-open").arg(dir).stdout(Stdio::null()).stderr(Stdio::null()).spawn().is_ok()
 }
+
+/// Opens a URL (e.g. a Docker container's reverse-proxy address) in the
+/// default browser.
+pub fn open_url(url: &str) -> bool {
+    Command::new("xdg-open")
+        .arg(url)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .is_ok()
+}

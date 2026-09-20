@@ -46,9 +46,14 @@ export struct DockerRow {
     status: string,
     ports: string,
     running: bool,
+    /// Server header: still waiting for its first poll.
+    pending: bool,
     /// Reverse-proxied through the user's NPM, with the forward port
     /// (feature "proxy").
     proxied: bool,
+    proxied-port: string,
+    proxied-domain: string,
+    proxied-url: string,
     proxied-port: string,
     /// Container: the row is expanded (its detail panel shows). Server header:
     /// the server's containers are shown.
@@ -100,6 +105,8 @@ export global DockerPage {
     callback column-dropped(string, length, length);
     /// Column `id` resized to `w` (its left edge was dragged).
     callback column-resized(string, float);
+    /// Opens a proxied container's public URL in the default browser.
+    callback open-proxied(string);
     callback columns-reset();
     /// Expand or collapse a container by id.
     callback toggle(string);
@@ -302,7 +309,7 @@ component ServerHeader inherits Rectangle {
             VerticalLayout {
                 alignment: center;
                 StateDot {
-                    tint: root.item.server-error ? Theme.danger : Theme.gpu;
+                    tint: root.item.server-error ? Theme.danger : root.item.pending ? Theme.faint : Theme.gpu;
                 }
             }
             if root.renaming: rename-scope := FocusScope {
@@ -469,16 +476,39 @@ component Cell inherits Rectangle {
     if root.head.key == 6: HorizontalLayout {
         alignment: center;
         spacing: 6px;
-        if root.item.proxied: StateDot {
-            tint: Theme.gpu;
+        if root.item.proxied: click := TouchArea {
+            mouse-cursor: pointer;
+            clicked => {
+                DockerPage.open-proxied(root.item.proxied-url);
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                StateDot {
+                    tint: Theme.gpu;
+                }
+                Text {
+                    text: root.item.proxied-domain;
+                    font-size: 12px * Theme.font-scale;
+                    color: Theme.text;
+                    overflow: elide;
+                }
+                Text {
+                    text: root.item.proxied-port;
+                    font-size: 12px * Theme.font-scale;
+                    color: Theme.dim;
+                }
+            }
         }
-        if root.item.proxied: Text {
-            text: root.item.proxied-port;
-            font-size: 12px * Theme.font-scale;
-            color: Theme.text;
-        }
-        if !root.item.proxied: StateDot {
-            tint: Theme.danger;
+        if !root.item.proxied: HorizontalLayout {
+            spacing: 6px;
+            StateDot {
+                tint: Theme.danger;
+            }
+            Text {
+                text: "—";
+                font-size: 12px * Theme.font-scale;
+                color: Theme.faint;
+            }
         }
     }
 }
