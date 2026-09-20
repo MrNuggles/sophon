@@ -70,7 +70,7 @@ fn layout() -> Vec<(String, i32, &'static str, f32, f32, bool)> {
 fn render_heads(d: &DockerUi) {
     let heads: Vec<DockerHead> = layout()
         .into_iter()
-        .map(|(_, key, label, r, w, flex)| DockerHead { key, label: label.into(), r, w, flex })
+        .map(|(id, key, label, r, w, flex)| DockerHead { id: id.into(), key, label: label.into(), r, w, flex })
         .collect();
     update_model(&d.heads, heads);
 }
@@ -201,8 +201,8 @@ pub fn install(app: &AppWindow) {
     g.on_sort_by(|key| {
         with(|d| d.set_sort(key.max(0) as usize));
     });
-    g.on_column_dropped(|key, x, w| {
-        with(|d| d.column_dropped(key, x, w));
+    g.on_column_dropped(|id, x, w| {
+        with(|d| d.column_dropped(id.to_string(), x, w));
     });
     g.on_columns_reset(|| {
         with(|d| {
@@ -473,11 +473,10 @@ impl DockerUi {
         render_rows(self);
     }
 
-    /// A header was dragged and dropped at `x` of a header `header_w` wide
-    /// (both in header coordinates — no window-size guessing).
-    fn column_dropped(&mut self, key: i32, x: f32, header_w: f32) {
+    /// The column with this id was dragged and dropped at `x` of a header
+    /// `header_w` wide (both in header coordinates — no window-size guessing).
+    fn column_dropped(&mut self, id: String, x: f32, header_w: f32) {
         let order: Vec<String> = settings::get(|s| s.docker_cols.clone());
-        let Some(id) = order.get(key.max(0) as usize).cloned() else { return };
         // Column centres, in the same header coordinates as the drop point.
         let centers: Vec<(String, f32)> = layout()
             .into_iter()

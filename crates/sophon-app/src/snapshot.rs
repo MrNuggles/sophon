@@ -50,6 +50,13 @@ enum Step {
     /// real connection is configured, so a mock can't clobber real settings).
     #[cfg(feature = "proxy")]
     ProxyConnect(&'static str, &'static str, &'static str),
+    /// Drops a Docker column header at an x position (regression: the drop
+    /// must move the named column, not the one at its old display position).
+    #[cfg(feature = "docker")]
+    DockerDropColumn(&'static str, f32),
+    /// Resets the Docker column order to the default.
+    #[cfg(feature = "docker")]
+    ColumnsReset,
     /// Opens or closes the Settings overlay (it lives outside the tab bar).
     SettingsOpen(bool),
     /// Switches to the tab with this panel id, resolved at run time (tab
@@ -124,6 +131,14 @@ pub fn start(app: &AppWindow, dir: PathBuf) {
         steps.extend([Step::DockerToggleServer, Step::Wait, Step::Shot("docker-collapsed"), Step::DockerToggleServer]);
         // Rename the first server (persisted to the config, shown at once), then put it back.
         steps.extend([Step::DockerRenameServer("Tiny renamed"), Step::Wait, Step::Shot("docker-renamed"), Step::DockerRenameServer("Tiny")]);
+        // Drop "state" at the far left: the State column (dot + label) must
+        // move there, data and all. Then reset the order.
+        steps.extend([
+            Step::DockerDropColumn("state", 60.0),
+            Step::Wait,
+            Step::Shot("docker-dropped"),
+            Step::ColumnsReset,
+        ]);
         // Off again: the tab disappears live and the view falls back to another tab.
         steps.extend([Step::SetToggle("tabs_docker", false), Step::Wait, Step::Shot("live-docker-off")]);
     }
@@ -224,6 +239,12 @@ pub fn start(app: &AppWindow, dir: PathBuf) {
             Some(Step::DockerToggleServer) => app.global::<crate::DockerPage>().invoke_toggle_server(0),
             #[cfg(feature = "docker")]
             Some(Step::DockerRenameServer(name)) => app.global::<crate::DockerPage>().invoke_rename_server(0, name.into()),
+            #[cfg(feature = "docker")]
+            Some(Step::DockerDropColumn(id, x)) => {
+                app.global::<crate::DockerPage>().invoke_column_dropped(id.into(), x, 1212.0);
+            }
+            #[cfg(feature = "docker")]
+            Some(Step::ColumnsReset) => app.global::<crate::DockerPage>().invoke_columns_reset(),
             #[cfg(feature = "proxy")]
             Some(Step::ProxyConnect(url, email, pass)) => {
                 app.global::<crate::ProxyPage>().invoke_connect(url.into(), email.into(), pass.into());

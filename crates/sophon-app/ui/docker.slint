@@ -34,9 +34,11 @@ export struct DockerRow {
     facts: [DockerKV],
 }
 
-/// One table column: `key` is the canonical sort id (settings' docker_sort),
-/// `r` the distance from the table's right edge to the column's left side.
+/// One table column: `id` is the stable column identity ("name", "cpu"…),
+/// `key` the canonical sort id (settings' docker_sort), `r` the distance from
+/// the table's right edge to the column's left side.
 export struct DockerHead {
+    id: string,
     key: int,
     label: string,
     r: length,
@@ -64,8 +66,8 @@ export global DockerPage {
     callback add-server(string, string);
     /// Sort by the column with this canonical id.
     callback sort-by(int);
-    /// Column `key` dropped at `x` of a header `width` wide.
-    callback column-dropped(int, length, length);
+    /// Column `id` dropped at `x` of a header `width` wide.
+    callback column-dropped(string, length, length);
     callback columns-reset();
     /// Expand or collapse a container by id.
     callback toggle(string);
@@ -104,6 +106,7 @@ component ActionBtn inherits Rectangle {
 /// A sortable, drag-to-reorder table header cell (same mechanics as the
 /// Processes tab: click sorts, dragging past 6px moves the column).
 component HeadCell inherits Rectangle {
+    in property <string> id;
     in property <int> key;
     in property <string> label;
     in property <bool> active;
@@ -649,6 +652,7 @@ export component DockerView inherits Rectangle {
                         }
                         Rectangle {
                             for h in DockerPage.heads: HeadCell {
+                                id: h.id;
                                 key: h.key;
                                 label: h.label;
                                 active: DockerPage.sort == h.key;
@@ -663,7 +667,7 @@ export component DockerView inherits Rectangle {
                                     DockerPage.sort-by(h.key);
                                 }
                                 dropped(x) => {
-                                    DockerPage.column-dropped(h.key, x, header.width);
+                                    DockerPage.column-dropped(h.id, x, header.width);
                                 }
                             }
                         }
