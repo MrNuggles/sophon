@@ -474,41 +474,43 @@ component Cell inherits Rectangle {
         }
     }
     if root.head.key == 6: HorizontalLayout {
+        height: parent.height;
+        padding-left: 2px;
+        padding-right: 10px;
         alignment: center;
         spacing: 6px;
-        if root.item.proxied: click := TouchArea {
-            mouse-cursor: pointer;
-            clicked => {
-                DockerPage.open-proxied(root.item.proxied-url);
-            }
-            HorizontalLayout {
-                spacing: 6px;
-                StateDot {
-                    tint: Theme.gpu;
-                }
-                Text {
-                    text: root.item.proxied-domain;
-                    font-size: 12px * Theme.font-scale;
-                    color: Theme.text;
-                    overflow: elide;
-                }
-                Text {
-                    text: root.item.proxied-port;
-                    font-size: 12px * Theme.font-scale;
-                    color: Theme.dim;
-                }
-            }
+        if root.item.proxied: StateDot {
+            tint: Theme.gpu;
         }
-        if !root.item.proxied: HorizontalLayout {
-            spacing: 6px;
-            StateDot {
-                tint: Theme.danger;
-            }
-            Text {
-                text: "—";
-                font-size: 12px * Theme.font-scale;
-                color: Theme.faint;
-            }
+        if !root.item.proxied: StateDot {
+            tint: Theme.danger;
+        }
+        if root.item.proxied: Text {
+            text: root.item.proxied-domain;
+            font-size: 12px * Theme.font-scale;
+            color: Theme.text;
+            overflow: elide;
+        }
+        if root.item.proxied: Text {
+            text: root.item.proxied-port;
+            font-size: 12px * Theme.font-scale;
+            color: Theme.dim;
+        }
+        if !root.item.proxied: Text {
+            text: "—";
+            font-size: 12px * Theme.font-scale;
+            color: Theme.faint;
+        }
+    }
+    // The whole proxied cell is the link out to that container's public URL.
+    if root.head.key == 6 && root.item.proxied: TouchArea {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        mouse-cursor: pointer;
+        clicked => {
+            DockerPage.open-proxied(root.item.proxied-url);
         }
     }
 }

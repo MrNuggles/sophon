@@ -6,9 +6,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use slint::{ComponentHandle, Timer, TimerMode};
-#[cfg(feature = "docker")]
-use slint::Model;
+use slint::{ComponentHandle, Model, Timer, TimerMode};
 
 use crate::{AppWindow, Theme};
 
@@ -62,6 +60,10 @@ enum Step {
     ProcessesDropColumn(i32, f32),
     /// Forwards to the Processes column-hide callback (-2 resets order).
     ColumnHide(i32),
+    /// Switches to the Performance tab's space-map disk: the one holding "/"
+    /// (the system disk), else the smallest filesystem — disk indices shuffle
+    /// between boots, so this is resolved at run time.
+    SpaceDiskAuto,
     /// Opens or closes the Settings overlay (it lives outside the tab bar).
     SettingsOpen(bool),
     /// Switches to the tab with this panel id, resolved at run time (tab
@@ -121,9 +123,7 @@ pub fn start(app: &AppWindow, dir: PathBuf) {
         steps.extend([Step::Tile(i), Step::Wait, Step::Wait]);
         steps.push(Step::Shot(["perf-0", "perf-1", "perf-2", "perf-3", "perf-4", "perf-5", "perf-6", "perf-7"][i as usize]));
     }
-    // Space map on the disk holding /home (tile 4 on the dev machine).
-    let disk_tile = std::env::var("SOPHON_SNAPSHOT_DISK").ok().and_then(|v| v.parse().ok()).unwrap_or(4);
-    steps.extend([Step::Tile(disk_tile), Step::Wait, Step::Scroll(-600.0), Step::Wait, Step::Shot("space-intro")]);
+    steps.extend([Step::SpaceDiskAuto, Step::Wait, Step::Scroll(-600.0), Step::Wait, Step::Shot("space-intro")]);
     steps.push(Step::SpaceScan);
     steps.extend(std::iter::repeat_with(|| Step::Wait).take(25));
     steps.extend([Step::Scroll(-600.0), Step::Wait, Step::Shot("space")]);
@@ -185,7 +185,7 @@ pub fn start(app: &AppWindow, dir: PathBuf) {
 
     // Light mode: one switch, every light shot.
     steps.extend([Step::Mode(1), Step::TabId("performance"), Step::Tile(0), Step::Wait, Step::Shot("light-perf")]);
-    steps.extend([Step::Tile(disk_tile), Step::Wait, Step::Shot("space-light")]);
+    steps.extend([Step::SpaceDiskAuto, Step::Wait, Step::Shot("space-light")]);
     steps.extend([Step::TabId("processes"), Step::Wait, Step::Shot("light-processes"), Step::Quit]);
 
     let weak = app.as_weak();
@@ -269,6 +269,26 @@ pub fn start(app: &AppWindow, dir: PathBuf) {
             #[cfg(feature = "proxy")]
             Some(Step::ProxyConnect(url, email, pass)) => {
                 app.global::<crate::ProxyPage>().invoke_connect(url.into(), email.into(), pass.into());
+            }
+            Some(Step::SpaceDiskAuto) => {
+                // The quickest scan: the system disk if there is one, else the
+                // smallest filesystem on the machine.
+                let mounts = sophon_core::space::mounts();
+                let target = mounts
+                    .iter()
+                    .filter(|m| m.total > 0)
+                    .min_by_key(|m| (m.path != std::path::Path::new("/"), m.total));
+                if let Some(m) = target {
+                    let tiles = app.get_tiles();
+                    for i in 0..tiles.row_count() {
+                        let Some(t) = tiles.row_data(i) else { continue };
+                        if t.title.as_str().contains(m.disk.as_str()) {
+                            app.set_tile(i as i32);
+                            app.invoke_tile_changed(i as i32);
+                            break;
+                        }
+                    }
+                }
             }
             Some(Step::SettingsOpen(open)) => app.set_settings_open(open),
             Some(Step::TabId(id)) => {
