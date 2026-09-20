@@ -73,12 +73,14 @@ itself is not a tab — it's the ☰ button beside the theme toggle.
 
 - **Docker**: connect to Docker on your LAN servers, list
   containers as a sortable table (click a column header to sort, drag to
-  reorder columns) — name, state, ports, age, CPU and RAM — collapse a
-  server's header to hide its containers, and start / stop / restart
-  them live (stopping asks first). Right-click a server header to show/hide its
-  containers or rename it. Requires a socket proxy on each server —
-  see **[docs/docker.md](docs/docker.md)**. Builds with `--no-default-features`
-  leave Docker out entirely.
+  reorder columns, drag a header's left edge to resize) — name, state,
+  ports, age, CPU and RAM, plus a **Proxied** column that lights up when
+  Nginx Proxy Manager routes that container (when both tabs are connected).
+  Collapse a server's header to hide its containers, and start / stop /
+  restart them live (stopping asks first). Right-click a server header to
+  show/hide its containers or rename it. Requires a socket proxy on each
+  server — see **[docs/docker.md](docs/docker.md)**. Builds with
+  `--no-default-features` leave Docker out entirely.
 - **Proxy (Nginx Proxy Manager)**: every host your NPM routes — domains,
   forward target and port, enabled state, certificate status with expiry —
   with connect-right-in-the-tab setup. Read-only (login, list hosts, list
