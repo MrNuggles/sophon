@@ -17,6 +17,8 @@ use std::time::{Duration, Instant};
 use slint::{Color, ComponentHandle, Model, ModelRc, VecModel};
 use sophon_core::history::Ring;
 use sophon_docker::{Container, Details, Server, ServerState, Stats};
+#[cfg(feature = "proxy")]
+use sophon_npm::http;
 
 use crate::graph::{self, nice_max};
 use crate::{AppWindow, DockerHead, DockerKV, DockerPage, DockerRow, fmt, settings};
@@ -29,6 +31,17 @@ const GUTTER: f32 = 14.0;
 const GAP: f32 = 8.0;
 /// (id, label, default width) per column, in canonical sort order (settings'
 /// DOCKER_COLS). The first displayed column stretches over the leftover width.
+#[cfg(feature = "proxy")]
+const COLS: [(&str, &str, f32); 7] = [
+    ("ports", "Ports", 190.0),
+    ("name", "Name", 240.0),
+    ("state", "State", 92.0),
+    ("age", "Age", 160.0),
+    ("cpu", "CPU", 64.0),
+    ("ram", "RAM", 92.0),
+    ("proxied", "Proxied", 70.0),
+];
+#[cfg(not(feature = "proxy"))]
 const COLS: [(&str, &str, f32); 6] = [
     ("ports", "Ports", 190.0),
     ("name", "Name", 240.0),
@@ -99,10 +112,39 @@ struct Net {
     collapsed: Mutex<HashSet<String>>,
     /// The tab is enabled in Settings → Tabs; false parks the poller entirely.
     enabled: AtomicBool,
+    /// The NPM connection (feature "proxy"), for the Proxied column. Set at
+    /// install and refreshed from settings on every UI render.
+    #[cfg(feature = "proxy")]
+    npm: Mutex<Option<NpmCreds>>,
     sort: AtomicU8,
     visible: AtomicBool,
     wake: mpsc::Sender<()>,
 }
+
+/// The NPM login, shared with the poller thread.
+#[cfg(feature = "proxy")]
+#[derive(Clone)]
+struct NpmCreds {
+    server: sophon_npm::Server,
+    email: String,
+    password: String,
+}
+
+#[cfg(feature = "proxy")]
+impl NpmCreds {
+    fn from_settings() -> Option<NpmCreds> {
+        let (url, email, password) =
+            settings::get(|s| (s.npm_url.clone(), s.npm_email.clone(), s.npm_password.clone()));
+        if url.is_empty() || email.is_empty() || password.is_empty() {
+            return None;
+        }
+        Some(NpmCreds { server: sophon_npm::Server::parse("", &url)?, email, password })
+    }
+}
+
+/// One NPM reverse-proxy target: (forward host, forward port, domain).
+#[cfg(feature = "proxy")]
+type NpmTarget = (String, u16, String);
 
 /// One poller delivery.
 struct Poll {
@@ -128,6 +170,9 @@ struct DockerUi {
     pending: Option<(String, String)>,
     rows: std::rc::Rc<VecModel<DockerRow>>,
     heads: std::rc::Rc<VecModel<DockerHead>>,
+    /// Flattened NPM targets for the Proxied column (feature "proxy").
+    #[cfg(feature = "proxy")]
+    npm: Vec<NpmTarget>,
 }
 
 thread_local! {
@@ -154,6 +199,8 @@ pub fn install(app: &AppWindow) {
         expanded: Mutex::new(HashSet::new()),
         collapsed: Mutex::new(HashSet::new()),
         enabled: AtomicBool::new(settings::get(|s| s.tabs_docker)),
+        #[cfg(feature = "proxy")]
+        npm: Mutex::new(NpmCreds::from_settings()),
         sort: AtomicU8::new(sort as u8),
         visible: AtomicBool::new(false),
         wake,
@@ -181,6 +228,8 @@ pub fn install(app: &AppWindow) {
         pending: None,
         rows,
         heads,
+        #[cfg(feature = "proxy")]
+        npm: Vec::new(),
     }));
 
     g.on_action(|id, op| {
@@ -296,8 +345,66 @@ fn apply(poll: Poll) {
     });
 }
 
+/// Logs in (once) and flattens the NPM proxy hosts into reverse-proxy
+/// targets: (forward host, forward port, domain). A forward host of
+/// localhost resolves to the NPM machine itself.
+#[cfg(feature = "proxy")]
+fn npm_fetch(creds: &NpmCreds, token: &mut Option<String>) -> Result<Vec<NpmTarget>, http::Error> {
+    let token = match token {
+        Some(t) => t.clone(),
+        None => {
+            let t = sophon_npm::login(&creds.server, &creds.email, &creds.password)?;
+            *token = Some(t.clone());
+            t
+        }
+    };
+    let hosts = sophon_npm::proxy_hosts(&creds.server, &token)?;
+    let mut out = Vec::new();
+    for h in &hosts {
+        let local = matches!(h.forward_host.as_str(), "127.0.0.1" | "localhost" | "::1");
+        let host = if local { creds.server.host.clone() } else { h.forward_host.clone() };
+        for d in &h.domains {
+            out.push((host.clone(), h.forward_port, d.clone()));
+        }
+    }
+    Ok(out)
+}
+
+/// Receives the flattened NPM targets from the poller thread.
+#[cfg(feature = "proxy")]
+fn apply_npm(targets: Vec<NpmTarget>) {
+    with(|d| {
+        d.npm = targets;
+        render_rows(d);
+    });
+}
+
+/// The NPM domains that reverse-proxy this container: a target matches when
+/// it points at the container's own server and one of the container's
+/// published ports (localhost targets were already resolved to the NPM host).
+#[cfg(feature = "proxy")]
+fn proxied_domains(d: &DockerUi, server_host: &str, c: &Container) -> Vec<String> {
+    if d.npm.is_empty() {
+        return Vec::new();
+    }
+    d.npm
+        .iter()
+        .filter(|(h, port, _)| h == server_host && c.ports.iter().any(|p| p.public == *port))
+        .map(|(_, _, dom)| dom.clone())
+        .collect()
+}
+
+#[cfg(not(feature = "proxy"))]
+fn proxied_domains(_d: &DockerUi, _server_host: &str, _c: &Container) -> Vec<String> {
+    Vec::new()
+}
+
 fn poller(net: Arc<Net>, wake: mpsc::Receiver<()>) {
     let mut tick: usize = 0;
+    #[cfg(feature = "proxy")]
+    let mut npm_token: Option<String> = None;
+    #[cfg(feature = "proxy")]
+    let mut npm_ok = false;
     loop {
         // Settings → Tabs off: the whole tab is dormant — nothing is fetched
         // until it's turned back on.
@@ -342,6 +449,24 @@ fn poller(net: Arc<Net>, wake: mpsc::Receiver<()>) {
                     states.push(ServerState { server: srv.clone(), error: None, containers: cs });
                 }
                 Err(e) => states.push(ServerState { server: srv.clone(), error: Some(e.to_string()), containers: Vec::new() }),
+            }
+        }
+        // The Proxied column (feature "proxy"): refresh the NPM host list
+        // while the tab is visible — immediately, then every ~30 s (NPM hosts
+        // change rarely). Errors stay silent; the Proxy tab reports those.
+        #[cfg(feature = "proxy")]
+        if net.visible.load(Relaxed) && (!npm_ok || tick % 15 == 0) {
+            let creds = net.npm.lock().unwrap().clone();
+            if let Some(creds) = creds {
+                match npm_fetch(&creds, &mut npm_token) {
+                    Ok(flat) => {
+                        npm_ok = true;
+                        if slint::invoke_from_event_loop(move || apply_npm(flat)).is_err() {
+                            return;
+                        }
+                    }
+                    Err(_) => npm_ok = false,
+                }
             }
         }
         tick = tick.wrapping_add(1);
@@ -515,12 +640,18 @@ impl DockerUi {
                 let _ = self.net.wake.send(());
             }
             "remove" => {
+                let name = self
+                    .states
+                    .get(idx)
+                    .map(|s| s.server.name.clone())
+                    .unwrap_or_else(|| format!("server {idx}"));
                 settings::update(|s| {
                     if idx < s.docker_servers.len() {
                         s.docker_servers.remove(idx);
                     }
                 });
                 self.reload_servers();
+                crate::ui::toast(format!("Removed {name} — its containers are untouched"));
             }
             _ => {}
         }
@@ -530,8 +661,12 @@ impl DockerUi {
         if Server::parse(name, addr).is_none() {
             return crate::ui::toast("Enter an address like 10.0.0.5:2375");
         }
-        let name = if name.trim().is_empty() { addr.trim().to_string() } else { name.trim().to_string() };
-        settings::update(|s| s.docker_servers.push((name, addr.trim().to_string())));
+        let addr = addr.trim().to_string();
+        let name = if name.trim().is_empty() { addr.clone() } else { name.trim().to_string() };
+        if settings::get(|s| s.docker_servers.iter().any(|(_, a)| a == &addr)) {
+            return crate::ui::toast(format!("{name} is already in the list"));
+        }
+        settings::update(|s| s.docker_servers.push((name.clone(), addr)));
         self.reload_servers();
     }
 
@@ -550,6 +685,16 @@ fn render() {
 
 fn render_rows(d: &mut DockerUi) {
     render_heads(d);
+    // Keep the poller's NPM login in step with the Proxy tab's connect form.
+    #[cfg(feature = "proxy")]
+    {
+        let creds = NpmCreds::from_settings();
+        let mut npm = d.net.npm.lock().unwrap();
+        if creds.as_ref().map(|c| (&c.server, &c.email, &c.password)) != npm.as_ref().map(|c| (&c.server, &c.email, &c.password)) {
+            *npm = creds;
+            let _ = d.net.wake.send(());
+        }
+    }
     let Some(app) = d.app.upgrade() else { return };
     let g = app.global::<DockerPage>();
     let mut rows: Vec<DockerRow> = Vec::new();
@@ -573,7 +718,14 @@ fn render_rows(d: &mut DockerUi) {
             ..Default::default()
         });
         let mut cs: Vec<&Container> = st.containers.iter().collect();
-        self_sort(&mut cs, d.sort, d.sort_desc, &d.latest);
+        #[cfg(feature = "proxy")]
+        let proxied: HashMap<String, bool> = cs
+            .iter()
+            .map(|c| (c.id.clone(), !proxied_domains(d, &st.server.host, c).is_empty()))
+            .collect();
+        #[cfg(not(feature = "proxy"))]
+        let proxied: HashMap<String, bool> = HashMap::new();
+        self_sort(&mut cs, d.sort, d.sort_desc, &d.latest, &proxied);
         for c in cs {
             // The summary counts every server's containers, shown or not.
             total += 1;
@@ -584,9 +736,10 @@ fn render_rows(d: &mut DockerUi) {
                 continue;
             }
             let is_open = d.expanded.contains(&c.id);
-            rows.push(container_row(c, i, is_open, d.latest.get(&c.id)));
+            let domains = proxied_domains(d, &st.server.host, c);
+            rows.push(container_row(c, i, is_open, d.latest.get(&c.id), !domains.is_empty()));
             if is_open {
-                rows.push(detail_row(c, i, d));
+                rows.push(detail_row(c, i, d, &domains.join(", ")));
             }
         }
     }
@@ -609,10 +762,11 @@ fn render_rows(d: &mut DockerUi) {
 }
 
 /// Sorts a server's containers by the chosen key.
-fn self_sort(cs: &mut [&Container], sort: usize, desc: bool, latest: &HashMap<String, Stats>) {
+fn self_sort(cs: &mut [&Container], sort: usize, desc: bool, latest: &HashMap<String, Stats>, proxied: &HashMap<String, bool>) {
     use std::cmp::Ordering;
     let cpu = |c: &Container| latest.get(&c.id).map_or(0.0, |s| s.cpu_pct);
     let mem = |c: &Container| latest.get(&c.id).map_or(0, |s| s.mem_used);
+    let prox = |c: &Container| proxied.get(&c.id).copied().unwrap_or(false);
     cs.sort_by(|a, b| {
         let o = match sort {
             0 => a.lowest_port().cmp(&b.lowest_port()),
@@ -620,7 +774,8 @@ fn self_sort(cs: &mut [&Container], sort: usize, desc: bool, latest: &HashMap<St
             2 => b.running().cmp(&a.running()).then(a.state.cmp(&b.state)),
             3 => a.created.cmp(&b.created),
             4 => cpu(a).total_cmp(&cpu(b)),
-            _ => mem(a).cmp(&mem(b)),
+            5 => mem(a).cmp(&mem(b)),
+            _ => prox(a).cmp(&prox(b)),
         };
         let o = if desc { o.reverse() } else { o };
         // Stable tiebreak by name so the list doesn't jitter.
@@ -628,7 +783,7 @@ fn self_sort(cs: &mut [&Container], sort: usize, desc: bool, latest: &HashMap<St
     });
 }
 
-fn container_row(c: &Container, server: usize, expanded: bool, stat: Option<&Stats>) -> DockerRow {
+fn container_row(c: &Container, server: usize, expanded: bool, stat: Option<&Stats>, proxied: bool) -> DockerRow {
     // Ports stack one per line; longer lists show the first two + a count.
     let ports_list: Vec<String> =
         c.ports.iter().map(|p| format!("{}→{}/{}", p.public, p.private, p.proto)).collect();
@@ -649,13 +804,14 @@ fn container_row(c: &Container, server: usize, expanded: bool, stat: Option<&Sta
         ports: ports.into(),
         running: c.running(),
         expanded,
+        proxied,
         cpu_text: stat.map_or_else(|| "—".into(), |s| format!("{:.1}%", s.cpu_pct)).into(),
         mem_text: stat.map_or_else(|| "—".into(), |s| fmt::bytes_short(s.mem_used)).into(),
         ..Default::default()
     }
 }
 
-fn detail_row(c: &Container, server: usize, d: &DockerUi) -> DockerRow {
+fn detail_row(c: &Container, server: usize, d: &DockerUi, proxied_by: &str) -> DockerRow {
     let stat = d.latest.get(&c.id).copied().unwrap_or_default();
     let hist = d.hist.get(&c.id);
     let cpu_peak = hist.map_or(0.0, |h| h.cpu.max());
@@ -693,6 +849,9 @@ fn detail_row(c: &Container, server: usize, d: &DockerUi) -> DockerRow {
     }
     let all_ports = c.ports.iter().map(|p| format!("{}→{}/{}", p.public, p.private, p.proto)).collect::<Vec<_>>().join("\n");
     kv("Published ports", if all_ports.is_empty() { "none".into() } else { all_ports });
+    if !proxied_by.is_empty() {
+        kv("Proxied by", proxied_by.to_string());
+    }
 
     DockerRow {
         kind: 2,

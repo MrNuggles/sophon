@@ -23,7 +23,7 @@ struct FakeHost {
     websockets: bool,
 }
 
-const HOSTS: [FakeHost; 5] = [
+const HOSTS: [FakeHost; 6] = [
     FakeHost {
         id: 7,
         domains: &["jellyfin.lcdrdata.org"],
@@ -49,6 +49,21 @@ const HOSTS: [FakeHost; 5] = [
         exploits: true,
         http2: true,
         websockets: true,
+    },
+    // Points at the docker mock's web-server (127.0.0.1:2376, public 8080),
+    // so cross-referencing the two mocks lights the Proxied dot.
+    FakeHost {
+        id: 11,
+        domains: &["web.lcdrdata.org"],
+        host: "127.0.0.1",
+        port: 8080,
+        enabled: true,
+        ssl_forced: true,
+        cert: 3,
+        caching: false,
+        exploits: true,
+        http2: true,
+        websockets: false,
     },
     FakeHost {
         id: 12,

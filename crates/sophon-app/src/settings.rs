@@ -148,8 +148,15 @@ pub struct Settings {
 
 /// The Docker table's columns, in canonical sort order (settings'
 /// `docker_sort` indexes this); `docker.columns` holds the display order.
+/// "proxied" exists only with the proxy feature (it reads NPM).
+#[cfg(feature = "proxy")]
+pub const DOCKER_COLS: [&str; 7] = ["ports", "name", "state", "age", "cpu", "ram", "proxied"];
+#[cfg(not(feature = "proxy"))]
 pub const DOCKER_COLS: [&str; 6] = ["ports", "name", "state", "age", "cpu", "ram"];
 /// The display order a fresh install gets.
+#[cfg(feature = "proxy")]
+pub const DOCKER_COLS_DEFAULT: [&str; 7] = ["name", "state", "ports", "age", "cpu", "ram", "proxied"];
+#[cfg(not(feature = "proxy"))]
 pub const DOCKER_COLS_DEFAULT: [&str; 6] = ["name", "state", "ports", "age", "cpu", "ram"];
 
 pub const UPDATE_MS: [u64; 5] = [500, 1000, 2000, 5000, 0];

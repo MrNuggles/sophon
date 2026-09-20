@@ -2,6 +2,32 @@ import { ScrollView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { Btn, Icon, Graph, Series } from "widgets.slint";
 
+/// A dark hover tooltip for icon buttons. `host` is the button; `tip` the text.
+component Tooltip inherits PopupWindow {
+    in property <string> text;
+    in property <length> y-pos;
+    x: -86px;
+    y: root.y-pos;
+    width: 200px;
+    close-policy: close-on-click-outside;
+    Rectangle {
+        border-radius: 8px * Theme.round;
+        background: Theme.dark ? #262b38 : #1f2330;
+        drop-shadow-blur: 10px;
+        drop-shadow-color: #00000055;
+        height: tip-text.preferred-height + 16px;
+        tip-text := Text {
+            x: 10px;
+            width: parent.width - 20px;
+            text: root.text;
+            wrap: word-wrap;
+            color: #ffffff;
+            font-size: 11.5px * Theme.font-scale;
+            horizontal-alignment: center;
+        }
+    }
+}
+
 export struct DockerKV {
     label: string,
     value: string,
@@ -20,6 +46,8 @@ export struct DockerRow {
     status: string,
     ports: string,
     running: bool,
+    /// Reverse-proxied through the user's NPM (feature "proxy").
+    proxied: bool,
     /// Container: the row is expanded (its detail panel shows). Server header:
     /// the server's containers are shown.
     expanded: bool,
@@ -86,11 +114,24 @@ component StateDot inherits Rectangle {
 component ActionBtn inherits Rectangle {
     in property <string> icon;
     in property <color> tint;
+    /// Shown after hovering for a moment ("" = no tooltip).
+    in property <string> tip;
     callback clicked;
     width: 30px;
     height: 30px;
     border-radius: 7px * Theme.round;
     background: ta.has-hover ? root.tint.with-alpha(0.18) : transparent;
+    Timer {
+        interval: 650ms;
+        running: ta.has-hover && root.tip != "";
+        triggered => {
+            tip.show();
+        }
+    }
+    tip := Tooltip {
+        text: root.tip;
+        y-pos: root.height + 6px;
+    }
     Icon {
         width: 15px;
         height: 15px;
@@ -99,6 +140,11 @@ component ActionBtn inherits Rectangle {
     }
     ta := TouchArea {
         mouse-cursor: pointer;
+        changed has-hover => {
+            if (!self.has-hover) {
+                tip.close();
+            }
+        }
         clicked => {
             root.clicked();
         }
@@ -300,6 +346,7 @@ component ServerHeader inherits Rectangle {
             }
             ActionBtn {
                 icon: "M 20 11 A 8 8 0 1 0 19 15 M 20 5 L 20 11 L 14 11";
+                tip: "Refresh";
                 tint: Theme.accent;
                 clicked => {
                     root.op("refresh");
@@ -307,6 +354,7 @@ component ServerHeader inherits Rectangle {
             }
             ActionBtn {
                 icon: "M 6 6 L 18 18 M 18 6 L 6 18";
+                tip: "Remove server (its containers are untouched)";
                 tint: Theme.danger;
                 clicked => {
                     root.op("remove");
@@ -416,6 +464,17 @@ component Cell inherits Rectangle {
             horizontal-alignment: right;
         }
     }
+    if root.head.key == 6: HorizontalLayout {
+        alignment: center;
+        if root.item.proxied: StateDot {
+            tint: Theme.gpu;
+        }
+        if !root.item.proxied: Text {
+            text: "—";
+            font-size: 12px * Theme.font-scale;
+            color: Theme.faint;
+        }
+    }
 }
 
 component ContainerRow inherits Rectangle {
@@ -451,6 +510,53 @@ component ContainerRow inherits Rectangle {
                 x: h.flex ? 12px : parent.width - h.r;
                 width: h.flex ? parent.width - h.r - 12px : h.w;
                 height: parent.height;
+            }
+        }
+        // Row actions on hover (Task-manager style), over the right edge.
+        if ta.has-hover && root.item.running: Rectangle {
+            x: parent.width - 122px;
+            width: 116px;
+            height: parent.height;
+            background: Theme.surface.with-alpha(0.92);
+            HorizontalLayout {
+                padding: 6px;
+                spacing: 4px;
+                alignment: center;
+                ActionBtn {
+                    icon: "M 5 5 L 12 12 M 12 12 L 5 19 M 19 5 A 10 10 0 0 1 19 19";
+                    tip: "Restart";
+                    tint: Theme.cpu;
+                    clicked => {
+                        root.act("restart");
+                    }
+                }
+                ActionBtn {
+                    icon: "M 7 7 L 17 7 L 17 17 L 7 17 Z";
+                    tip: "Stop";
+                    tint: Theme.danger;
+                    clicked => {
+                        root.act("stop");
+                    }
+                }
+            }
+        }
+        if ta.has-hover && !root.item.running: Rectangle {
+            x: parent.width - 122px;
+            width: 116px;
+            height: parent.height;
+            background: Theme.surface.with-alpha(0.92);
+            HorizontalLayout {
+                padding: 6px;
+                spacing: 4px;
+                alignment: center;
+                ActionBtn {
+                    icon: "M 7 5 L 19 12 L 7 19 Z";
+                    tip: "Start";
+                    tint: Theme.gpu;
+                    clicked => {
+                        root.act("start");
+                    }
+                }
             }
         }
     }

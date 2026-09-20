@@ -254,17 +254,53 @@ export component Icon inherits Path {
 export component IconButton inherits Rectangle {
     in property <string> icon;
     in property <bool> active: false;
+    /// Shown after hovering for a moment ("" = no tooltip).
+    in property <string> tip: "";
     callback clicked;
     width: 34px;
     height: 34px;
     border-radius: 9px * Theme.round;
     background: ta.pressed ? Theme.selected : ta.has-hover ? Theme.hover : root.active ? Theme.accent.with-alpha(0.16) : transparent;
+    Timer {
+        interval: 650ms;
+        running: ta.has-hover && root.tip != "";
+        triggered => {
+            tip.show();
+        }
+    }
+    tip := PopupWindow {
+        x: -83px;
+        y: root.height + 6px;
+        width: 200px;
+        close-policy: close-on-click-outside;
+        Rectangle {
+            border-radius: 8px * Theme.round;
+            background: Theme.dark ? #262b38 : #1f2330;
+            drop-shadow-blur: 10px;
+            drop-shadow-color: #00000055;
+            height: tip-text.preferred-height + 16px;
+            tip-text := Text {
+                x: 10px;
+                width: parent.width - 20px;
+                text: root.tip;
+                wrap: word-wrap;
+                color: #ffffff;
+                font-size: 11.5px * Theme.font-scale;
+                horizontal-alignment: center;
+            }
+        }
+    }
     Icon {
         icon: root.icon;
         color: root.active ? Theme.accent : ta.has-hover ? Theme.text : Theme.dim;
     }
     ta := TouchArea {
         mouse-cursor: pointer;
+        changed has-hover => {
+            if (!self.has-hover) {
+                tip.close();
+            }
+        }
         clicked => {
             root.clicked();
         }

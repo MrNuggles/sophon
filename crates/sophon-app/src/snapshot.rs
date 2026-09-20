@@ -131,6 +131,21 @@ pub fn start(app: &AppWindow, dir: PathBuf) {
     steps.extend([Step::SpaceSelect(40, false), Step::SpaceSelect(60, true), Step::SpaceSelect(80, true), Step::Wait, Step::Shot("space-selected")]);
     steps.extend([Step::SpaceAskTrash, Step::Wait, Step::Shot("space-confirm"), Step::SpaceCancelTrash, Step::SpaceSelect(-1, false)]);
 
+    // Proxy (dark): the connect form, then the loaded table against a local
+    // npm-mock (skipped when a real connection is configured). Its npm.*
+    // settings feed the Docker tab's Proxied column, so this runs first.
+    #[cfg(feature = "proxy")]
+    {
+        steps.extend([Step::SetToggle("tabs_proxy", true), Step::TabId("proxy"), Step::Wait, Step::Shot("proxy-connect")]);
+        if !crate::settings::get(|s| !s.npm_url.is_empty()) {
+            steps.extend([Step::ProxyConnect("http://127.0.0.1:2381", "sophon@mock", "mockpass")]);
+            steps.extend(std::iter::repeat_with(|| Step::Wait).take(6));
+            steps.push(Step::Shot("proxy"));
+        }
+        steps.extend([Step::SetToggle("tabs_proxy", false), Step::Wait, Step::Shot("live-proxy-off")]);
+    }
+
+
     // Docker (dark): the toggle is a global callback, so the tab is enabled
     // without visiting Settings. Shots: the table, the stop confirmation
     // (opened and cancelled, never accepted), a collapsed header, a rename.
@@ -158,19 +173,6 @@ pub fn start(app: &AppWindow, dir: PathBuf) {
         ]);
         // Off again: the tab disappears live and the view falls back to another tab.
         steps.extend([Step::SetToggle("tabs_docker", false), Step::Wait, Step::Shot("live-docker-off")]);
-    }
-
-    // Proxy (dark): the connect form, then the loaded table against a local
-    // npm-mock (skipped when a real connection is configured).
-    #[cfg(feature = "proxy")]
-    {
-        steps.extend([Step::SetToggle("tabs_proxy", true), Step::TabId("proxy"), Step::Wait, Step::Shot("proxy-connect")]);
-        if !crate::settings::get(|s| !s.npm_url.is_empty()) {
-            steps.extend([Step::ProxyConnect("http://127.0.0.1:2381", "sophon@mock", "mockpass")]);
-            steps.extend(std::iter::repeat_with(|| Step::Wait).take(6));
-            steps.push(Step::Shot("proxy"));
-        }
-        steps.extend([Step::SetToggle("tabs_proxy", false), Step::Wait, Step::Shot("live-proxy-off")]);
     }
 
     // Settings (dark): every category in one overlay visit.
