@@ -19,10 +19,61 @@ use sophon_core::history::Ring;
 use sophon_docker::{Container, Details, Server, ServerState, Stats};
 
 use crate::graph::{self, nice_max};
-use crate::{AppWindow, DockerKV, DockerPage, DockerRow, fmt, settings};
+use crate::{AppWindow, DockerHead, DockerKV, DockerPage, DockerRow, fmt, settings};
 
 const POLL_VISIBLE: Duration = Duration::from_secs(2);
 const POLL_HIDDEN: Duration = Duration::from_secs(15);
+
+/// Table layout: right gutter and gap between columns.
+const GUTTER: f32 = 14.0;
+const GAP: f32 = 8.0;
+/// (id, label, width) per column, in canonical sort order (settings'
+/// DOCKER_COLS). The first displayed column stretches over the leftover width.
+const COLS: [(&str, &str, f32); 6] = [
+    ("ports", "Ports", 190.0),
+    ("name", "Name", 240.0),
+    ("state", "State", 92.0),
+    ("age", "Age", 160.0),
+    ("cpu", "CPU", 64.0),
+    ("ram", "RAM", 92.0),
+];
+
+fn col_spec(id: &str) -> (&'static str, f32) {
+    COLS.iter().find(|(i, ..)| *i == id).map(|(_, l, w)| (*l, *w)).unwrap_or(("?", 100.0))
+}
+
+fn sort_index(id: &str) -> i32 {
+    settings::DOCKER_COLS.iter().position(|c| *c == id).unwrap_or(0) as i32
+}
+
+/// Display order with each column's geometry: (id, sort id, label, r, width,
+/// flex) — r is the distance from the table's right edge to the column's left
+/// side; the flex column's r is to its right boundary.
+fn layout() -> Vec<(String, i32, &'static str, f32, f32, bool)> {
+    let order: Vec<String> = settings::get(|s| s.docker_cols.clone());
+    let mut r = GUTTER;
+    let mut out = Vec::new();
+    for (idx, id) in order.iter().enumerate().rev() {
+        let (label, w) = col_spec(id);
+        if idx == 0 {
+            out.push((id.clone(), sort_index(id), label, r, w, true));
+        } else {
+            r += w;
+            out.push((id.clone(), sort_index(id), label, r, w, false));
+            r += GAP;
+        }
+    }
+    out.reverse();
+    out
+}
+
+fn render_heads(d: &DockerUi) {
+    let heads: Vec<DockerHead> = layout()
+        .into_iter()
+        .map(|(_, key, label, r, w, flex)| DockerHead { key, label: label.into(), r, w, flex })
+        .collect();
+    update_model(&d.heads, heads);
+}
 
 /// Sort keys, matching the chips in docker.slint.
 pub const SORTS: [&str; 6] = ["Ports", "Name", "State", "Age", "CPU", "RAM"];
@@ -73,6 +124,7 @@ struct DockerUi {
     /// A stop awaiting the shared confirmation dialog: (container id, "stop").
     pending: Option<(String, String)>,
     rows: std::rc::Rc<VecModel<DockerRow>>,
+    heads: std::rc::Rc<VecModel<DockerHead>>,
 }
 
 thread_local! {
@@ -104,8 +156,10 @@ pub fn install(app: &AppWindow) {
         wake,
     });
     let rows = std::rc::Rc::new(VecModel::default());
+    let heads = std::rc::Rc::new(VecModel::default());
     let g = app.global::<DockerPage>();
     g.set_rows(ModelRc::from(rows.clone()));
+    g.set_heads(ModelRc::from(heads.clone()));
     g.set_sort(sort as i32);
     g.set_sort_desc(sort_desc);
 
@@ -123,6 +177,7 @@ pub fn install(app: &AppWindow) {
         details: HashMap::new(),
         pending: None,
         rows,
+        heads,
     }));
 
     g.on_action(|id, op| {
@@ -143,8 +198,17 @@ pub fn install(app: &AppWindow) {
     g.on_toggle(|id| {
         with(|d| d.toggle(&id));
     });
-    g.on_set_sort(|key| {
+    g.on_sort_by(|key| {
         with(|d| d.set_sort(key.max(0) as usize));
+    });
+    g.on_column_dropped(|col, frac| {
+        with(|d| d.column_dropped(col, frac));
+    });
+    g.on_columns_reset(|| {
+        with(|d| {
+            settings::update(|s| s.docker_cols = settings::DOCKER_COLS_DEFAULT.iter().map(|c| c.to_string()).collect());
+            render_rows(d);
+        });
     });
 
     std::thread::Builder::new().name("docker".into()).spawn(move || poller(net, rx)).ok();
@@ -224,6 +288,7 @@ fn apply(poll: Poll) {
 }
 
 fn poller(net: Arc<Net>, wake: mpsc::Receiver<()>) {
+    let mut tick: usize = 0;
     loop {
         // Settings → Tabs off: the whole tab is dormant — nothing is fetched
         // until it's turned back on.
@@ -242,17 +307,22 @@ fn poller(net: Arc<Net>, wake: mpsc::Receiver<()>) {
         let sort_usage = visible && matches!(net.sort.load(Relaxed) as usize, 4 | 5);
         let mut stats = HashMap::new();
         let mut details = HashMap::new();
-        let states: Vec<ServerState> = servers
-            .iter()
-            .map(|srv| match sophon_docker::list(srv) {
+        let mut states: Vec<ServerState> = Vec::new();
+        for srv in &servers {
+            // A collapsed header hides its containers; skip their stats.
+            let srv_collapsed = collapsed.contains(&format!("{}:{}", srv.host, srv.port));
+            match sophon_docker::list(srv) {
                 Ok(cs) => {
-                    // A collapsed header hides its containers; skip their stats.
-                    let srv_collapsed = collapsed.contains(&format!("{}:{}", srv.host, srv.port));
-                    for c in &cs {
-                        if srv_collapsed || !c.running() {
+                    // The CPU/RAM columns: a rotating window of ~6 stat
+                    // requests per poll sweeps every running container over
+                    // several polls (one-shot stats cost a request each).
+                    let step = (cs.len() + 5) / 6;
+                    for (i, c) in cs.iter().enumerate() {
+                        if !c.running() {
                             continue;
                         }
-                        let want_stats = expanded.contains(&c.id) || sort_usage;
+                        let in_window = !srv_collapsed && (i + tick) % step.max(1) == 0;
+                        let want_stats = expanded.contains(&c.id) || sort_usage || in_window;
                         if want_stats && let Ok(s) = sophon_docker::stats(srv, &c.id) {
                             stats.insert(c.id.clone(), s);
                         }
@@ -260,11 +330,12 @@ fn poller(net: Arc<Net>, wake: mpsc::Receiver<()>) {
                             details.insert(c.id.clone(), dt);
                         }
                     }
-                    ServerState { server: srv.clone(), error: None, containers: cs }
+                    states.push(ServerState { server: srv.clone(), error: None, containers: cs });
                 }
-                Err(e) => ServerState { server: srv.clone(), error: Some(e.to_string()), containers: Vec::new() },
-            })
-            .collect();
+                Err(e) => states.push(ServerState { server: srv.clone(), error: Some(e.to_string()), containers: Vec::new() }),
+            }
+        }
+        tick = tick.wrapping_add(1);
         if slint::invoke_from_event_loop(move || apply(Poll { states, stats, details })).is_err() {
             return;
         }
@@ -402,6 +473,35 @@ impl DockerUi {
         render_rows(self);
     }
 
+    /// A header was dragged and dropped at `frac` of the header width.
+    fn column_dropped(&mut self, col: i32, frac: f32) {
+        let Some(app) = self.app.upgrade() else { return };
+        let order: Vec<String> = settings::get(|s| s.docker_cols.clone());
+        let Some(id) = order.get(col.max(0) as usize).cloned() else { return };
+        let width = app.window().size().width as f32 / app.window().scale_factor();
+        let x = frac * width;
+        // Column centres, in the same coordinates as the drop point.
+        let centers: Vec<(String, f32)> = layout()
+            .into_iter()
+            .map(|(cid, _, _, r, w, flex)| {
+                let cx = if flex { 12.0 + (width - r - 12.0) / 2.0 } else { width - r + w / 2.0 };
+                (cid, cx)
+            })
+            .collect();
+        let target = centers.iter().filter(|(c, _)| c != &id).position(|(_, cx)| x < *cx);
+        settings::update(|s| {
+            s.docker_cols.retain(|c| c != &id);
+            let others: Vec<String> = centers.iter().map(|(c, _)| c.clone()).filter(|c| c != &id).collect();
+            // Insert before the column it was dropped left of.
+            let pos = match target.and_then(|t| others.get(t)) {
+                Some(before) => s.docker_cols.iter().position(|c| c == before).unwrap_or(s.docker_cols.len()),
+                None => s.docker_cols.len(),
+            };
+            s.docker_cols.insert(pos, id);
+        });
+        render_rows(self);
+    }
+
     fn server_op(&mut self, idx: usize, op: &str) {
         match op {
             "refresh" => {
@@ -442,6 +542,7 @@ fn render() {
 }
 
 fn render_rows(d: &mut DockerUi) {
+    render_heads(d);
     let Some(app) = d.app.upgrade() else { return };
     let g = app.global::<DockerPage>();
     let mut rows: Vec<DockerRow> = Vec::new();
@@ -476,7 +577,7 @@ fn render_rows(d: &mut DockerUi) {
                 continue;
             }
             let is_open = d.expanded.contains(&c.id);
-            rows.push(container_row(c, i, is_open));
+            rows.push(container_row(c, i, is_open, d.latest.get(&c.id)));
             if is_open {
                 rows.push(detail_row(c, i, d));
             }
@@ -520,7 +621,7 @@ fn self_sort(cs: &mut [&Container], sort: usize, desc: bool, latest: &HashMap<St
     });
 }
 
-fn container_row(c: &Container, server: usize, expanded: bool) -> DockerRow {
+fn container_row(c: &Container, server: usize, expanded: bool, stat: Option<&Stats>) -> DockerRow {
     let ports = c.ports.iter().map(|p| format!("{}→{}/{}", p.public, p.private, p.proto)).collect::<Vec<_>>().join("  ");
     DockerRow {
         kind: 1,
@@ -534,6 +635,8 @@ fn container_row(c: &Container, server: usize, expanded: bool) -> DockerRow {
         ports: ports.into(),
         running: c.running(),
         expanded,
+        cpu_text: stat.map_or_else(|| "—".into(), |s| format!("{:.1}%", s.cpu_pct)).into(),
+        mem_text: stat.map_or_else(|| "—".into(), |s| fmt::bytes_short(s.mem_used)).into(),
         ..Default::default()
     }
 }

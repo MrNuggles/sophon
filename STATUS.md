@@ -65,9 +65,9 @@ entry); tray hover shows a live summary; Ctrl+Q / tray menu quits.
 via a kernel eBPF counter.
 
 **Docker tab (optional, off by default)** — connect to Docker on LAN
-servers via a socket proxy; list containers (running + stopped) with ports and
-server; **collapsible server headers**; sort by Ports / Name / State / Age /
-CPU / RAM; **expand a container** for live CPU/memory graphs and full details;
+servers via a socket proxy; list containers as a **sortable, drag-to-reorder
+table** (name, state, ports, age, CPU, RAM — click a header to sort); collapsible
+server headers; **expand a container** for live CPU/memory graphs and full details;
 start / stop / restart (stopping asks first). Right-click a header to
 show/hide its containers or rename the server. Live updates; add/remove servers
 in-tab; hide the whole tab from Settings → Tabs (its poller then parks).

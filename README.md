@@ -72,8 +72,9 @@ at all): **Performance** on by default, **Docker** off by default. Settings
 itself is not a tab — it's the ☰ button beside the theme toggle.
 
 - **Docker**: connect to Docker on your LAN servers, list
-  containers (running and stopped) with their published ports and server,
-  collapse a server's header to hide its containers, and start / stop / restart
+  containers as a sortable table (click a column header to sort, drag to
+  reorder columns) — name, state, ports, age, CPU and RAM — collapse a
+  server's header to hide its containers, and start / stop / restart
   them live (stopping asks first). Right-click a server header to show/hide its
   containers or rename it. Requires a socket proxy on each server —
   see **[docs/docker.md](docs/docker.md)**. Builds with `--no-default-features`

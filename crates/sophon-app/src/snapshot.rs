@@ -95,9 +95,11 @@ pub fn start(app: &AppWindow, dir: PathBuf) {
     #[cfg(feature = "docker")]
     {
         steps.extend([Step::SettingsOpen(true), Step::SetToggle("tabs_docker", true)]);
-        steps.extend(std::iter::repeat_with(|| Step::Wait).take(5));
+        steps.extend(std::iter::repeat_with(|| Step::Wait).take(8));
         steps.extend([Step::TabId("docker")]);
-        steps.extend(std::iter::repeat_with(|| Step::Wait).take(6));
+        // Generous: a slow/unreachable server blocks the first poll for up to
+        // its 4 s timeout per request.
+        steps.extend(std::iter::repeat_with(|| Step::Wait).take(14));
         steps.push(Step::Shot("docker"));
         steps.extend([Step::DockerAskStop, Step::Wait, Step::Shot("docker-confirm"), Step::DockerCancelStop]);
         // A collapsed server header hides that server's containers.
@@ -163,8 +165,7 @@ pub fn start(app: &AppWindow, dir: PathBuf) {
             Some(Step::Wait) => {}
             Some(Step::Shot(name)) => match app.window().take_snapshot() {
                 Ok(buf) => {
-                    let path = dir.join(format!("{name}.png"));
-                    if let Err(e) = crate::png::write(&path, buf.width(), buf.height(), buf.as_bytes()) {
+                    let path = dir.join(format!("{name}.png"));                    if let Err(e) = crate::png::write(&path, buf.width(), buf.height(), buf.as_bytes()) {
                         eprintln!("snapshot {name}: {e}");
                     }
                 }

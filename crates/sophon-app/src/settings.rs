@@ -129,6 +129,8 @@ pub struct Settings {
     pub docker_servers: Vec<(String, String)>,
     pub docker_sort: usize,
     pub docker_sort_desc: bool,
+    /// Docker table column order (ids from DOCKER_COLS).
+    pub docker_cols: Vec<String>,
     // Optional tabs (Settings → Tabs). "processes" is permanent (the app's
     // dashboard). A tab must also be compiled in (--features) before
     // its toggle appears.
@@ -141,6 +143,12 @@ pub struct Settings {
     pub npm_email: String,
     pub npm_password: String,
 }
+
+/// The Docker table's columns, in canonical sort order (settings'
+/// `docker_sort` indexes this); `docker.columns` holds the display order.
+pub const DOCKER_COLS: [&str; 6] = ["ports", "name", "state", "age", "cpu", "ram"];
+/// The display order a fresh install gets.
+pub const DOCKER_COLS_DEFAULT: [&str; 6] = ["name", "state", "ports", "age", "cpu", "ram"];
 
 pub const UPDATE_MS: [u64; 5] = [500, 1000, 2000, 5000, 0];
 pub const TRAY_SECS: [u64; 4] = [5, 10, 30, 0];
@@ -217,6 +225,7 @@ impl Default for Settings {
             docker_servers: Vec::new(),
             docker_sort: 0,
             docker_sort_desc: false,
+            docker_cols: DOCKER_COLS_DEFAULT.iter().map(|s| s.to_string()).collect(),
             tabs_performance: true,
             tabs_docker: false,
             tabs_proxy: false,
@@ -376,6 +385,18 @@ impl Settings {
                 }
                 "docker.sort" => self.docker_sort = n(),
                 "docker.sort_desc" => self.docker_sort_desc = b(),
+                "docker.columns" => {
+                    self.docker_cols = list().into_iter().filter(|c| DOCKER_COLS.contains(&c.as_str())).collect();
+                    // Keep every known column exactly once, in the saved order.
+                    for c in DOCKER_COLS {
+                        if !self.docker_cols.contains(&c.to_string()) {
+                            self.docker_cols.push(c.to_string());
+                        }
+                    }
+                    if self.docker_cols.is_empty() {
+                        self.docker_cols = DOCKER_COLS_DEFAULT.iter().map(|s| s.to_string()).collect();
+                    }
+                }
                 "tabs.performance" => self.tabs_performance = b(),
                 "tabs.docker" => self.tabs_docker = b(),
                 "tabs.proxy" => self.tabs_proxy = b(),
@@ -482,6 +503,7 @@ impl Settings {
         }
         kv("docker.sort", self.docker_sort.to_string());
         kv("docker.sort_desc", self.docker_sort_desc.to_string());
+        kv("docker.columns", self.docker_cols.join(","));
         kv("tabs.performance", self.tabs_performance.to_string());
         kv("tabs.docker", self.tabs_docker.to_string());
         kv("tabs.proxy", self.tabs_proxy.to_string());
