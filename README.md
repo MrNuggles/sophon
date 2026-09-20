@@ -74,10 +74,11 @@ itself is not a tab — it's the ☰ button beside the theme toggle.
 - **Docker**: connect to Docker on your LAN servers, list
   containers as a sortable table (click a column header to sort, drag to
   reorder columns, drag a header's left edge to resize) — name, state,
-  ports, age, CPU and RAM, plus a **Proxied** column that lights up when
-  Nginx Proxy Manager routes that container (when both tabs are connected).
-  Collapse a server's header to hide its containers, and start / stop /
-  restart them live (stopping asks first). Right-click a server header to
+  ports, age, CPU and RAM, plus a **Proxied** column showing which public
+  URL routes that container — green dot and clickable to open it, red dot
+  when it's not proxied (when both tabs are connected). Hover a row for
+  its start / restart / stop buttons (stopping asks first). Collapse a
+  server's header to hide its containers. Right-click a server header to
   show/hide its containers or rename it. Requires a socket proxy on each
   server — see **[docs/docker.md](docs/docker.md)**. Builds with
   `--no-default-features` leave Docker out entirely.

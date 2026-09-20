@@ -1,6 +1,6 @@
 # Sophon — Project Status
 
-_Last updated: 2026-09-19_
+_Last updated: 2026-09-20 (table polish round)_
 
 A fast, beautiful, resource-light task manager for Linux (Rust + Slint), built
 for a gamer's machine. This file tracks **what exists and where we are**. For how
@@ -13,8 +13,8 @@ security model, [SECURITY.md](SECURITY.md).
   Performance, Settings) plus tray, admin helper, the security pass, the modular
   panel system, and the optional Docker tab.
 - **Build:** clean in both configs (`cargo build --release` and
-  `--features docker`); no warnings.
-- **Tests:** 34 passing (7 app + 13 core + 5 net + 5 docker + 4 npm).
+  `--no-default-features`); no warnings.
+- **Tests:** 38 passing (11 app + 13 core + 5 net + 5 docker + 4 npm).
 - **Size:** ~16k lines across five crates.
 - **Footprint:** ~25 MB RAM, ~1.2% of one core with the window open, ~0.13% in
   the tray. Sampler ~2.6 ms CPU/tick.
@@ -65,17 +65,21 @@ entry); tray hover shows a live summary; Ctrl+Q / tray menu quits.
 via a kernel eBPF counter.
 
 **Docker tab (optional, off by default)** — connect to Docker on LAN
-servers via a socket proxy; list containers as a **sortable, drag-to-reorder
-table** (name, state, ports, age, CPU, RAM — click a header to sort); collapsible
-server headers; **expand a container** for live CPU/memory graphs and full details;
-start / stop / restart (stopping asks first). Right-click a header to
-show/hide its containers or rename the server. Live updates; add/remove servers
-in-tab; hide the whole tab from Settings → Tabs (its poller then parks).
+servers via a socket proxy; list containers as a **sortable, drag-to-reorder,
+resizable table** (name, state, ports, age, CPU, RAM, proxied — click a header
+to sort); collapsible server headers; **expand a container** for live CPU/memory
+graphs and full details; hover a row for its start/restart/stop buttons and
+hover any button for a tooltip; start / stop / restart (stopping asks first).
+Right-click a header to show/hide its containers or rename the server. Live
+updates; servers render instantly with a "Connecting…" status until their first
+poll; add/remove servers in-tab; hide the whole tab from Settings → Tabs (its
+poller then parks).
 
 **Proxy tab (optional, off by default)** — talks to Nginx Proxy Manager's API
 (admin port, default 81): every proxy host with its domains, forward target
 and port, enabled state and certificate status (expiry shown, flagged red when
-lapsed). Enable it in Settings → Tabs and connect with your NPM login right in
+lapsed); its host list also feeds the Docker tab's Proxied column. Enable it in
+Settings → Tabs and connect with your NPM login right in
 the tab — credentials live only in this machine's settings file (written 0600)
 and the client is read-only (login, list hosts, list certificates — nothing
 else). Refresh / forget buttons in the header; click a row for full details.
