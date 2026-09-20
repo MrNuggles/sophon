@@ -68,6 +68,8 @@ export global DockerPage {
     callback sort-by(int);
     /// Column `id` dropped at `x` of a header `width` wide.
     callback column-dropped(string, length, length);
+    /// Column `id` resized to `w` (its left edge was dragged).
+    callback column-resized(string, float);
     callback columns-reset();
     /// Expand or collapse a container by id.
     callback toggle(string);
@@ -117,12 +119,16 @@ component HeadCell inherits Rectangle {
     callback clicked;
     /// Dropped after dragging; the argument is the drop x in the header.
     callback dropped(length);
+    /// The left edge was dragged to `width`.
+    callback resized(length);
     property <length> press-x;
     property <length> drag-dx;
     property <bool> pressing;
     property <bool> dragging;
-    background: root.dragging ? Theme.selected : ta.has-hover ? Theme.hover : transparent;
-    z: root.dragging ? 2 : 0;
+    property <length> resize-dx;
+    property <bool> resizing;
+    background: root.dragging || root.resizing ? Theme.selected : ta.has-hover ? Theme.hover : transparent;
+    z: root.dragging || root.resizing ? 2 : 0;
     VerticalLayout {
         x: root.dragging ? root.drag-dx : 0;
         padding-right: 10px;
@@ -162,6 +168,29 @@ component HeadCell inherits Rectangle {
             root.drag-dx = self.mouse-x - root.press-x;
             if (abs(root.drag-dx) > 6px) {
                 root.dragging = true;
+            }
+        }
+    }
+    // Drag the left edge to resize; the edge follows the pointer while dragging.
+    Rectangle {
+        x: root.resizing ? root.resize-dx : 0;
+        width: 6px;
+        background: edge-ta.has-hover || root.resizing ? Theme.accent.with-alpha(0.6) : transparent;
+        edge-ta := TouchArea {
+            mouse-cursor: MouseCursor.col-resize;
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down) {
+                    root.resizing = true;
+                    root.resize-dx = 0;
+                }
+                if (event.kind == PointerEventKind.up && root.resizing) {
+                    root.resizing = false;
+                    root.resized(root.w - root.resize-dx);
+                    root.resize-dx = 0;
+                }
+            }
+            moved => {
+                root.resize-dx = self.mouse-x - 3px;
             }
         }
     }
@@ -668,6 +697,9 @@ export component DockerView inherits Rectangle {
                                 }
                                 dropped(x) => {
                                     DockerPage.column-dropped(h.id, x, header.width);
+                                }
+                                resized(w) => {
+                                    DockerPage.column-resized(h.id, w / 1px);
                                 }
                             }
                         }

@@ -1586,7 +1586,12 @@ impl Ui {
         }
         let cols = app.global::<Cols>();
         let w_model: Vec<f32> = w;
-        if cols.get_w().iter().collect::<Vec<f32>>() != w_model || cols.get_total() != from_right {
+        // A reorder changes only the positions (r), not the widths — all
+        // three must be compared or the cells miss pure drag-reorders.
+        if cols.get_w().iter().collect::<Vec<f32>>() != w_model
+            || cols.get_r().iter().collect::<Vec<f32>>() != r
+            || cols.get_total() != from_right
+        {
             cols.set_w(ModelRc::new(VecModel::from(w_model)));
             cols.set_r(ModelRc::new(VecModel::from(r)));
             cols.set_total(from_right);

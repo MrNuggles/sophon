@@ -27,7 +27,7 @@ const POLL_HIDDEN: Duration = Duration::from_secs(15);
 /// Table layout: right gutter and gap between columns.
 const GUTTER: f32 = 14.0;
 const GAP: f32 = 8.0;
-/// (id, label, width) per column, in canonical sort order (settings'
+/// (id, label, default width) per column, in canonical sort order (settings'
 /// DOCKER_COLS). The first displayed column stretches over the leftover width.
 const COLS: [(&str, &str, f32); 6] = [
     ("ports", "Ports", 190.0),
@@ -38,8 +38,10 @@ const COLS: [(&str, &str, f32); 6] = [
     ("ram", "RAM", 92.0),
 ];
 
-fn col_spec(id: &str) -> (&'static str, f32) {
-    COLS.iter().find(|(i, ..)| *i == id).map(|(_, l, w)| (*l, *w)).unwrap_or(("?", 100.0))
+/// (label, width) per column id, honouring saved resizes.
+fn col_spec(id: &str, widths: &[(String, u32)]) -> (&'static str, f32) {
+    let saved = widths.iter().find(|(c, _)| c == id).map(|(_, w)| *w as f32);
+    COLS.iter().find(|(i, ..)| *i == id).map_or(("?", 100.0), |(_, l, w)| (*l, saved.unwrap_or(*w)))
 }
 
 fn sort_index(id: &str) -> i32 {
@@ -51,10 +53,11 @@ fn sort_index(id: &str) -> i32 {
 /// side; the flex column's r is to its right boundary.
 fn layout() -> Vec<(String, i32, &'static str, f32, f32, bool)> {
     let order: Vec<String> = settings::get(|s| s.docker_cols.clone());
+    let widths: Vec<(String, u32)> = settings::get(|s| s.docker_col_widths.clone());
     let mut r = GUTTER;
     let mut out = Vec::new();
     for (idx, id) in order.iter().enumerate().rev() {
-        let (label, w) = col_spec(id);
+        let (label, w) = col_spec(id, &widths);
         if idx == 0 {
             out.push((id.clone(), sort_index(id), label, r, w, true));
         } else {
@@ -206,9 +209,15 @@ pub fn install(app: &AppWindow) {
     });
     g.on_columns_reset(|| {
         with(|d| {
-            settings::update(|s| s.docker_cols = settings::DOCKER_COLS_DEFAULT.iter().map(|c| c.to_string()).collect());
+            settings::update(|s| {
+                s.docker_cols = settings::DOCKER_COLS_DEFAULT.iter().map(|c| c.to_string()).collect();
+                s.docker_col_widths.clear();
+            });
             render_rows(d);
         });
+    });
+    g.on_column_resized(|id, w| {
+        with(|d| d.column_resized(&id, w));
     });
 
     std::thread::Builder::new().name("docker".into()).spawn(move || poller(net, rx)).ok();
@@ -487,6 +496,16 @@ impl DockerUi {
             .collect();
         let new_order = crate::panels::reorder_after_drop(&order, &id, x, &centers);
         settings::update(|s| s.docker_cols = new_order);
+        render_rows(self);
+    }
+
+    /// Saves a column's dragged width (the header edge was released).
+    fn column_resized(&mut self, id: &str, w: f32) {
+        let w = w.clamp(48.0, 500.0).round() as u32;
+        settings::update(|s| {
+            s.docker_col_widths.retain(|(c, _)| c != id);
+            s.docker_col_widths.push((id.to_string(), w));
+        });
         render_rows(self);
     }
 

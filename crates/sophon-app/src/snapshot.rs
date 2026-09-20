@@ -57,6 +57,11 @@ enum Step {
     /// Resets the Docker column order to the default.
     #[cfg(feature = "docker")]
     ColumnsReset,
+    /// Drops a Processes column (by COLUMNS index) at an x position — same
+    /// regression, for the Processes table.
+    ProcessesDropColumn(i32, f32),
+    /// Forwards to the Processes column-hide callback (-2 resets order).
+    ColumnHide(i32),
     /// Opens or closes the Settings overlay (it lives outside the tab bar).
     SettingsOpen(bool),
     /// Switches to the tab with this panel id, resolved at run time (tab
@@ -81,6 +86,18 @@ pub fn start(app: &AppWindow, dir: PathBuf) {
     steps.extend([Step::ToggleRow(1), Step::Wait, Step::SelectRow(2), Step::Wait, Step::Wait, Step::Shot("processes-child")]);
     // Collapse the Apps section.
     steps.extend([Step::SelectRow(0), Step::Wait, Step::Shot("processes-collapsed"), Step::SelectRow(0)]);
+    // Drop the Memory column (COLUMNS index 2) at the far left: the memory
+    // cells must move under it. Then reset order/widths/hidden.
+    steps.extend([
+        Step::ProcessesDropColumn(2, 60.0),
+        Step::Wait,
+        Step::Shot("processes-dropped"),
+        Step::ProcessesDropColumn(2, 60.0),
+        Step::Wait,
+        Step::Shot("processes-dropped-again"),
+    ]);
+    steps.extend([Step::ProcessesDropColumn(2, 60.0)]);
+    steps.push(Step::ColumnHide(-2));
     // A few settings applied live (compact density, bar graphs, rounder corners).
     steps.extend([
         Step::SetChoice("density", 1),
@@ -245,6 +262,8 @@ pub fn start(app: &AppWindow, dir: PathBuf) {
             }
             #[cfg(feature = "docker")]
             Some(Step::ColumnsReset) => app.global::<crate::DockerPage>().invoke_columns_reset(),
+            Some(Step::ProcessesDropColumn(col, x)) => app.invoke_column_dropped(col, x, 1212.0),
+            Some(Step::ColumnHide(col)) => app.invoke_column_hide(col),
             #[cfg(feature = "proxy")]
             Some(Step::ProxyConnect(url, email, pass)) => {
                 app.global::<crate::ProxyPage>().invoke_connect(url.into(), email.into(), pass.into());

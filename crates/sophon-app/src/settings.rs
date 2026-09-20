@@ -131,6 +131,8 @@ pub struct Settings {
     pub docker_sort_desc: bool,
     /// Docker table column order (ids from DOCKER_COLS).
     pub docker_cols: Vec<String>,
+    /// Per-column widths overriding the defaults ("name", 240) etc.
+    pub docker_col_widths: Vec<(String, u32)>,
     // Optional tabs (Settings → Tabs). "processes" is permanent (the app's
     // dashboard). A tab must also be compiled in (--features) before
     // its toggle appears.
@@ -226,6 +228,7 @@ impl Default for Settings {
             docker_sort: 0,
             docker_sort_desc: false,
             docker_cols: DOCKER_COLS_DEFAULT.iter().map(|s| s.to_string()).collect(),
+            docker_col_widths: Vec::new(),
             tabs_performance: true,
             tabs_docker: false,
             tabs_proxy: false,
@@ -397,6 +400,12 @@ impl Settings {
                         self.docker_cols = DOCKER_COLS_DEFAULT.iter().map(|s| s.to_string()).collect();
                     }
                 }
+                "docker.col_widths" => {
+                    self.docker_col_widths = list()
+                        .iter()
+                        .filter_map(|p| p.split_once(':').and_then(|(c, w)| Some((c.to_string(), w.parse().ok()?))))
+                        .collect();
+                }
                 "tabs.performance" => self.tabs_performance = b(),
                 "tabs.docker" => self.tabs_docker = b(),
                 "tabs.proxy" => self.tabs_proxy = b(),
@@ -504,6 +513,7 @@ impl Settings {
         kv("docker.sort", self.docker_sort.to_string());
         kv("docker.sort_desc", self.docker_sort_desc.to_string());
         kv("docker.columns", self.docker_cols.join(","));
+        kv("docker.col_widths", self.docker_col_widths.iter().map(|(c, w)| format!("{c}:{w}")).collect::<Vec<_>>().join(","));
         kv("tabs.performance", self.tabs_performance.to_string());
         kv("tabs.docker", self.tabs_docker.to_string());
         kv("tabs.proxy", self.tabs_proxy.to_string());
