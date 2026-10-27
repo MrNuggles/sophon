@@ -802,6 +802,7 @@ export component ProcessesView inherits Rectangle {
                     alignment: center;
                     Toggle {
                         text: g;
+                        radio: true;
                         checked: root.grouping == i;
                         toggled => {
                             root.grouping = i;

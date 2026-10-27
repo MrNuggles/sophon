@@ -25,6 +25,8 @@ enum Step {
     Zoom(f32, f32),
     ResetView,
     SettingsCategory(i32),
+    /// A left click at a logical window position (checks real click behaviour).
+    Click(f32, f32),
     /// Pretends a newer release exists (no network) so the banner shows.
     #[cfg(feature = "updates")]
     UpdateDemo,
@@ -178,6 +180,11 @@ pub fn start(app: &AppWindow, dir: PathBuf) {
         steps.extend([Step::SetToggle("tabs_docker", false), Step::Wait, Step::Shot("live-docker-off")]);
     }
 
+    // By app / Tree / Flat behave as a radio group: clicking one lights only that one.
+    steps.extend([Step::TabId("processes"), Step::Click(645.0, 85.0), Step::Wait, Step::Shot("grouping-tree")]);
+    steps.extend([Step::Click(705.0, 85.0), Step::Wait, Step::Shot("grouping-flat")]);
+    steps.extend([Step::Click(576.0, 85.0), Step::Wait, Step::Shot("grouping-app")]);
+
     // Update banner, with a made-up newer release.
     #[cfg(feature = "updates")]
     steps.extend([Step::TabId("processes"), Step::UpdateDemo, Step::Wait, Step::Shot("update-banner")]);
@@ -229,6 +236,13 @@ pub fn start(app: &AppWindow, dir: PathBuf) {
             }
             #[cfg(feature = "updates")]
             Some(Step::UpdateDemo) => crate::update::demo(),
+            Some(Step::Click(x, y)) => {
+                use slint::platform::{PointerEventButton, WindowEvent};
+                let position = slint::LogicalPosition::new(x, y);
+                app.window().dispatch_event(WindowEvent::PointerMoved { position });
+                app.window().dispatch_event(WindowEvent::PointerPressed { position, button: PointerEventButton::Left });
+                app.window().dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
+            }
             Some(Step::SetToggle(id, v)) => app.global::<crate::SettingsPage>().invoke_toggle(id.into(), v),
             Some(Step::SetChoice(id, v)) => app.global::<crate::SettingsPage>().invoke_choose(id.into(), v),
             Some(Step::SetSlide(id, v)) => app.global::<crate::SettingsPage>().invoke_slide(id.into(), v),

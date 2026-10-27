@@ -336,6 +336,10 @@ export component Btn inherits Rectangle {
 
 export component Toggle inherits Rectangle {
     in-out property <bool> checked;
+    /// One of a set where exactly one is on (By app / Tree / Flat): a click
+    /// never turns it off or flips it itself — the owner's `checked` binding
+    /// decides, so only the chosen one stays lit.
+    in property <bool> radio: false;
     in property <string> text;
     callback toggled(bool);
     height: 30px;
@@ -353,8 +357,12 @@ export component Toggle inherits Rectangle {
     ta := TouchArea {
         mouse-cursor: pointer;
         clicked => {
-            root.checked = !root.checked;
-            root.toggled(root.checked);
+            if (root.radio) {
+                root.toggled(true);
+            } else {
+                root.checked = !root.checked;
+                root.toggled(root.checked);
+            }
         }
     }
 }
