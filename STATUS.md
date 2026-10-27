@@ -1,6 +1,6 @@
 # Sophon — Project Status
 
-_Last updated: 2026-09-20 (table polish round)_
+_Last updated: 2026-10-27 (packaging + updater, v0.3.0)_
 
 A fast, beautiful, resource-light task manager for Linux (Rust + Slint), built
 for a gamer's machine. This file tracks **what exists and where we are**. For how
@@ -9,9 +9,11 @@ security model, [SECURITY.md](SECURITY.md).
 
 ## Where we are right now
 
-- **Tagged release:** `v0.2` on `main` — the full task manager (Processes,
+- **Tagged release:** `v0.3.0` on `main` — the full task manager (Processes,
   Performance, Settings) plus tray, admin helper, the security pass, the modular
-  panel system, and the optional Docker tab.
+  panel system, the optional Docker and Proxy tabs, release packages (AppImage,
+  `.deb`, `.rpm` on the GitHub Releases page) and the built-in update checker.
+  Pushing a `vX.Y.Z` tag builds and publishes new packages automatically.
 - **Build:** clean in both configs (`cargo build --release` and
   `--no-default-features`); no warnings.
 - **Tests:** 46 passing (19 app + 13 core + 5 net + 5 docker + 4 npm).
@@ -151,6 +153,11 @@ checksum-verified. Source builds just link to the release page. See SECURITY.md.
     owns its controller (install, visibility, toggle), and `panels.rs` is the
     one place that lists them. Adding a tab no longer touches ui.rs or
     main.rs.
+
+14. **Packaging and updates (v0.3.0)** — AppImage / `.deb` / `.rpm` built by
+    GitHub Actions on every `vX.Y.Z` tag (no Flatpak: its sandbox can't see
+    host processes); a polkit policy for `/usr/bin/sophon`; the update checker
+    and one-click installer.
 
 ## Open decisions / next steps
 
