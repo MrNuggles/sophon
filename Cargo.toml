@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/sophon-core", "crates/sophon-app", "crates/sophon-docker", "crates/sophon-net", "crates/sophon-npm"]
 
 [workspace.package]
-version = "0.3.1"
+version = "0.3.2"
 edition = "2024"
 license = "GPL-3.0-or-later"
 

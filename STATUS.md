@@ -1,6 +1,6 @@
 # Sophon — Project Status
 
-_Last updated: 2026-10-27 (v0.3.1: start-in-tray fix)_
+_Last updated: 2026-10-27 (v0.3.2: radio-button fix)_
 
 A fast, beautiful, resource-light task manager for Linux (Rust + Slint), built
 for a gamer's machine. This file tracks **what exists and where we are**. For how
@@ -9,7 +9,7 @@ security model, [SECURITY.md](SECURITY.md).
 
 ## Where we are right now
 
-- **Tagged release:** `v0.3.1` on `main` — the full task manager (Processes,
+- **Tagged release:** `v0.3.2` on `main` — the full task manager (Processes,
   Performance, Settings) plus tray, admin helper, the security pass, the modular
   panel system, the optional Docker and Proxy tabs, release packages (AppImage,
   `.deb`, `.rpm` on the GitHub Releases page) and the built-in update checker.
@@ -158,7 +158,8 @@ checksum-verified. Source builds just link to the release page. See SECURITY.md.
     GitHub Actions on every `vX.Y.Z` tag (no Flatpak: its sandbox can't see
     host processes); a polkit policy for `/usr/bin/sophon`; the update checker
     and one-click installer. v0.3.1 fixed the window never opening after a
-    hidden start in the tray (Wayland).
+    hidden start in the tray (Wayland); v0.3.2 made By app / Tree / Flat a real
+    one-at-a-time choice.
 
 ## Open decisions / next steps
 
