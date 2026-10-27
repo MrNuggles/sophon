@@ -431,10 +431,17 @@ pub fn focused(shared: &Shared) {
 
 /// The window was closed to the tray; remembers its size for when it comes back.
 pub fn to_tray(shared: &Shared, size: slint::PhysicalSize) {
-    with(|ui| ui.tray_size = Some(size));
+    // Started hidden in the tray, the window was never shown, so its size is
+    // 0x0; restoring that on open would hand the compositor an empty window.
+    with(|ui| ui.tray_size = usable_size(size));
     shared.in_tray.store(true, Relaxed);
     set_hidden(shared, true);
     debug("window closed to tray");
+}
+
+/// A window size worth restoring (a never-shown window reports 0x0).
+fn usable_size(size: slint::PhysicalSize) -> Option<slint::PhysicalSize> {
+    (size.width > 0 && size.height > 0).then_some(size)
 }
 
 /// The window is coming back from the tray. Returns the size it had.
@@ -442,7 +449,7 @@ pub fn from_tray(shared: &Shared) -> Option<slint::PhysicalSize> {
     let was = shared.in_tray.swap(false, Relaxed);
     set_hidden(shared, false);
     debug("window opened from tray");
-    if was { with(|ui| ui.tray_size.take()).flatten() } else { None }
+    if was { with(|ui| ui.tray_size.take()).flatten().and_then(usable_size) } else { None }
 }
 
 fn debug(msg: &str) {
@@ -2124,4 +2131,17 @@ fn segment(start: f32, frac: f32, color: u32, label: &str, value: String) -> Seg
 /// Settings changed: re-render with the new preferences.
 pub fn settings_changed() {
     with(|ui| ui.render());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::usable_size;
+    use slint::PhysicalSize;
+
+    #[test]
+    fn a_never_shown_window_has_no_size_to_restore() {
+        assert_eq!(usable_size(PhysicalSize::new(0, 0)), None);
+        assert_eq!(usable_size(PhysicalSize::new(1240, 0)), None);
+        assert_eq!(usable_size(PhysicalSize::new(1240, 800)), Some(PhysicalSize::new(1240, 800)));
+    }
 }

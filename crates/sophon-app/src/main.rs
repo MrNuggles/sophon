@@ -163,6 +163,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let _ = app.hide();
         }
         let _ = app.show();
+        // A window that started hidden in the tray was never mapped; on
+        // Wayland its first show() creates the surface but never draws into
+        // it. One hide/show cycle gets it mapped properly (the same path as
+        // reopening after close-to-tray, which works).
+        if NEVER_SHOWN.swap(false, Relaxed) {
+            let _ = app.hide();
+            let _ = app.show();
+        }
+        apply_on_top(&app);
         if let Some(size) = ui::from_tray(&tray_shared) {
             app.window().set_size(size);
         }
@@ -182,10 +191,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if start_in_tray {
+        NEVER_SHOWN.store(true, Relaxed);
         // Launched at login with "start hidden in the tray".
         ui::to_tray(&shared, app.window().size());
     } else {
         app.show()?;
+        apply_on_top(&app);
     }
     if prefs.admin_on_start {
         admin::enable();
@@ -272,8 +283,23 @@ fn debug_log(msg: &str) {
 /// window (Slint's window API doesn't expose the window level). X11 and
 /// Windows honour it; on Wayland the compositor decides.
 pub fn set_always_on_top(app: &AppWindow, on: bool) {
+    ON_TOP.store(on, Relaxed);
+    // Touching the winit window creates it. Doing that before the first show
+    // (e.g. when starting hidden in the tray) leaves a Wayland window that
+    // never draws, so it waits until the window is up (see `apply_on_top`).
+    if app.window().is_visible() {
+        apply_on_top(app);
+    }
+}
+
+/// Sophon started hidden in the tray and the window hasn't been shown yet.
+static NEVER_SHOWN: AtomicBool = AtomicBool::new(false);
+
+/// The last "always on top" choice, applied whenever the window is shown.
+static ON_TOP: AtomicBool = AtomicBool::new(false);
+
+fn apply_on_top(app: &AppWindow) {
     use slint::winit_030::winit::window::WindowLevel;
-    let _ = app.window().with_winit_window(|w| {
-        w.set_window_level(if on { WindowLevel::AlwaysOnTop } else { WindowLevel::Normal });
-    });
+    let level = if ON_TOP.load(Relaxed) { WindowLevel::AlwaysOnTop } else { WindowLevel::Normal };
+    let _ = app.window().with_winit_window(|w| w.set_window_level(level));
 }
