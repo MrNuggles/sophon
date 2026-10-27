@@ -70,6 +70,7 @@ static PROXY: crate::proxy_panel::Controller = crate::proxy_panel::Controller;
 /// reach all of them (their callbacks and pollers exist regardless of the
 /// Settings toggle; the toggle only gates polling and the tab bar).
 pub fn all_tabs() -> Vec<&'static dyn Tab> {
+    #[cfg_attr(not(any(feature = "docker", feature = "proxy")), allow(unused_mut))]
     let mut v: Vec<&'static dyn Tab> = vec![&ProcessesTab, &PerformanceTab];
     #[cfg(feature = "docker")]
     v.push(&DOCKER);

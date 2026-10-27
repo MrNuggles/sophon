@@ -226,7 +226,7 @@ fn walk<'s, 'e: 's>(s: &'s Scope<'s, 'e>, ctx: &'e Ctx<'e>, path: PathBuf, name:
     let mut spawned: Vec<ScopedJoinHandle<'s, Node>> = Vec::new();
     let mut inline = Vec::new();
     for (p, n) in subdirs {
-        let free = ctx.slots.fetch_update(Relaxed, Relaxed, |v| v.checked_sub(1)).is_ok();
+        let free = ctx.slots.try_update(Relaxed, Relaxed, |v| v.checked_sub(1)).is_ok();
         if free {
             spawned.push(s.spawn(move || {
                 if ctx.options.idle {

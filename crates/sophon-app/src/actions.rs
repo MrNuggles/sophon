@@ -98,6 +98,7 @@ pub fn open_location(path: &str) -> bool {
 
 /// Opens a URL (e.g. a Docker container's reverse-proxy address) in the
 /// default browser.
+#[cfg(feature = "docker")]
 pub fn open_url(url: &str) -> bool {
     Command::new("xdg-open")
         .arg(url)
