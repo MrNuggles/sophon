@@ -17,6 +17,8 @@ mod panels;
 mod docker_panel;
 #[cfg(feature = "proxy")]
 mod proxy_panel;
+#[cfg(feature = "updates")]
+mod update;
 mod ebpf;
 mod helper;
 mod settings_page;
@@ -89,6 +91,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ui::install(&app, shared.clone());
     space_ui::install(&app);
     settings_page::install(&app, shared.clone());
+    #[cfg(feature = "updates")]
+    update::install(&app, shared.clone());
     for tab in panels::all_tabs() {
         tab.install(&app);
     }

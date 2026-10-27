@@ -96,9 +96,9 @@ pub fn open_location(path: &str) -> bool {
     Command::new("xdg-open").arg(dir).stdout(Stdio::null()).stderr(Stdio::null()).spawn().is_ok()
 }
 
-/// Opens a URL (e.g. a Docker container's reverse-proxy address) in the
-/// default browser.
-#[cfg(feature = "docker")]
+/// Opens a URL (a Docker container's reverse-proxy address, a release page)
+/// in the default browser.
+#[cfg(any(feature = "docker", feature = "updates"))]
 pub fn open_url(url: &str) -> bool {
     Command::new("xdg-open")
         .arg(url)

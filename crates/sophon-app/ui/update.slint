@@ -1,0 +1,9 @@
+/// The update banner's state; driven by update.rs (feature "updates").
+export global Updates {
+    in property <bool> banner;
+    in property <string> text;
+    in property <string> action;
+    callback act();
+    callback notes();
+    callback dismiss();
+}

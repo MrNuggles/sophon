@@ -144,6 +144,10 @@ pub struct Settings {
     pub npm_url: String,
     pub npm_email: String,
     pub npm_password: String,
+    // Update checker (feature "updates").
+    pub update_check: bool,
+    /// Unix seconds of the last successful check.
+    pub update_last_check: u64,
 }
 
 /// The Docker table's columns, in canonical sort order (settings'
@@ -242,6 +246,8 @@ impl Default for Settings {
             npm_url: String::new(),
             npm_email: String::new(),
             npm_password: String::new(),
+            update_check: true,
+            update_last_check: 0,
         }
     }
 }
@@ -419,6 +425,8 @@ impl Settings {
                 "npm.url" => self.npm_url = value.to_string(),
                 "npm.email" => self.npm_email = value.to_string(),
                 "npm.password" => self.npm_password = value.to_string(),
+                "updates.check" => self.update_check = b(),
+                "updates.last_check" => self.update_last_check = value.parse().unwrap_or(0),
                 _ => {}
             }
         }
@@ -527,6 +535,8 @@ impl Settings {
         kv("npm.url", self.npm_url.clone());
         kv("npm.email", self.npm_email.clone());
         kv("npm.password", self.npm_password.clone());
+        kv("updates.check", self.update_check.to_string());
+        kv("updates.last_check", self.update_last_check.to_string());
         o
     }
 }

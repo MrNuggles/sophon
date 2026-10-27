@@ -91,6 +91,32 @@ the risk moves to the servers:
   list proxy hosts, list certificates — and never enables, disables or deletes
   anything in NPM.
 
+## Update checker (feature `updates`, on by default)
+
+Sophon makes **outbound HTTPS requests only**, and only to GitHub: once a day it
+fetches `api.github.com/repos/MrNuggles/sophon/releases/latest` (nothing about
+your machine is sent beyond what any HTTP request carries), and when you press
+**Update now** it downloads the release assets. Details:
+
+- HTTPS is done by the system `curl`, launched with an argv array (never a
+  shell) and restricted to `https` including redirects. Turn the check off in
+  Settings → General → Updates and it never connects; `--no-default-features`
+  removes the code entirely.
+- Only assets whose URL starts with this repository's release-download prefix
+  and whose names are plain file names are ever fetched.
+- Every download is checked against the release's `SHA256SUMS` (fetched over
+  HTTPS from the same release) and discarded on a mismatch. This catches
+  corruption and a swapped file; it does **not** protect against someone who
+  can publish to the GitHub repository itself — there are no release
+  signatures yet.
+- A `.deb` / `.rpm` update is installed with `pkexec apt-get|dnf|zypper|rpm`
+  on a file in `~/.cache/sophon/update/` (mode 0700). Sophon itself never runs
+  as root and the password prompt is the system's. Accepted limitation: between
+  the checksum check and the install, other software running as **you** could in
+  principle replace that file, as it could with any file you hand to your
+  package manager. An AppImage update is written next to the running AppImage
+  and renamed over it; no privileges are involved.
+
 ## Packaging requirement (before distributing to others)
 
 pkexec runs **the binary at the path Sophon was launched from**. When that binary

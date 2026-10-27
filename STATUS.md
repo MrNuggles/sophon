@@ -14,7 +14,7 @@ security model, [SECURITY.md](SECURITY.md).
   panel system, and the optional Docker tab.
 - **Build:** clean in both configs (`cargo build --release` and
   `--no-default-features`); no warnings.
-- **Tests:** 38 passing (11 app + 13 core + 5 net + 5 docker + 4 npm).
+- **Tests:** 46 passing (19 app + 13 core + 5 net + 5 docker + 4 npm).
 - **Size:** ~16k lines across five crates.
 - **Footprint:** ~25 MB RAM, ~1.2% of one core with the window open, ~0.13% in
   the tray. Sampler ~2.6 ms CPU/tick.
@@ -86,6 +86,11 @@ else). Refresh / forget buttons in the header; click a row for full details.
 Ships with a mock NPM API for offline testing (`sophon-npm --example
 npm-mock`).
 
+**Updates (default feature, can be turned off)** — a daily GitHub release check
+(system `curl`, HTTPS only) with a banner and a button in Settings → General →
+Updates. Installs an AppImage in place or a `.deb` / `.rpm` through `pkexec`;
+checksum-verified. Source builds just link to the release page. See SECURITY.md.
+
 ## Verified vs. not verified
 
 - **Verified here:** all builds, 30 unit tests, every view rendered to PNG
@@ -102,7 +107,13 @@ npm-mock`).
   mock's log shows one login, then token reuse across polls).
 - **Verified by you:** the Docker tab against both of your real servers
   (2026-09-19).
+- **Updater:** version compare, release parsing, SHA-256 (known vectors),
+  asset choice, install commands, and an end-to-end AppImage update against a
+  local fake release (including a tampered download being refused) are unit
+  tested; the banner is snapshot-verified with a made-up release.
 - **Needs your hands (couldn't test from here):**
+  - A real update against GitHub — it needs a release newer than the running
+    build — and the `.deb` / `.rpm` install through the password dialog.
   - The two password-gated admin paths — killing a system process, and UDP
     per-app counting (the eBPF program loading as root).
   - Hover / drag / context-menu interactions that need a live mouse (including

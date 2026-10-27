@@ -3939,6 +3939,7 @@ dependencies = [
  "slint-build",
  "sophon-core",
  "sophon-docker",
+ "sophon-net",
  "sophon-npm",
 ]
 

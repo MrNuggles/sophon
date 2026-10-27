@@ -25,6 +25,9 @@ enum Step {
     Zoom(f32, f32),
     ResetView,
     SettingsCategory(i32),
+    /// Pretends a newer release exists (no network) so the banner shows.
+    #[cfg(feature = "updates")]
+    UpdateDemo,
     SetToggle(&'static str, bool),
     SetChoice(&'static str, i32),
     SetSlide(&'static str, f32),
@@ -175,6 +178,10 @@ pub fn start(app: &AppWindow, dir: PathBuf) {
         steps.extend([Step::SetToggle("tabs_docker", false), Step::Wait, Step::Shot("live-docker-off")]);
     }
 
+    // Update banner, with a made-up newer release.
+    #[cfg(feature = "updates")]
+    steps.extend([Step::TabId("processes"), Step::UpdateDemo, Step::Wait, Step::Shot("update-banner")]);
+
     // Settings (dark): every category in one overlay visit.
     steps.push(Step::SettingsOpen(true));
     let setting_shots = ["settings-0", "settings-1", "settings-2", "settings-3", "settings-4", "settings-5", "settings-6", "settings-7-tabs"];
@@ -220,6 +227,8 @@ pub fn start(app: &AppWindow, dir: PathBuf) {
                 g.set_category(i);
                 g.invoke_select_category(i);
             }
+            #[cfg(feature = "updates")]
+            Some(Step::UpdateDemo) => crate::update::demo(),
             Some(Step::SetToggle(id, v)) => app.global::<crate::SettingsPage>().invoke_toggle(id.into(), v),
             Some(Step::SetChoice(id, v)) => app.global::<crate::SettingsPage>().invoke_choose(id.into(), v),
             Some(Step::SetSlide(id, v)) => app.global::<crate::SettingsPage>().invoke_slide(id.into(), v),

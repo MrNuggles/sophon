@@ -150,6 +150,10 @@ pub fn install(app: &AppWindow, shared: Arc<Shared>) {
         if id.as_str() == "admin" {
             crate::admin::toggle();
         }
+        #[cfg(feature = "updates")]
+        if id.as_str() == "update" {
+            crate::update::press();
+        }
     });
 
     apply_all();
@@ -367,6 +371,23 @@ fn build(s: &Settings, p: &Page) -> Vec<SettingItem> {
     });
     v.push(toggle(c, "admin_on_start", "Enable admin features when Sophon starts", "Ask for your password at startup instead of when you first need it.", s.admin_on_start, d.admin_on_start));
 
+    #[cfg(feature = "updates")]
+    {
+        v.push(heading(c, "UPDATES"));
+        v.push(toggle(c, "update_check", "Check for updates automatically", "Once a day Sophon asks GitHub whether a newer release exists and shows a banner if so. Nothing else is sent. Turn off and it never connects.", s.update_check, d.update_check));
+        let (button, status) = crate::update::row();
+        v.push(SettingItem {
+            id: "update".into(),
+            category: c.into(),
+            label: "Software update".into(),
+            hint: "Downloads the new version, checks it against the release's checksums, and installs it. Packages (.deb / .rpm) ask for your password; an AppImage updates itself in place.".into(),
+            kind: 6,
+            button,
+            status,
+            ..Default::default()
+        });
+    }
+
     let c = cats[1];
     v.push(heading(c, "THEME"));
     v.push(choice(c, "theme", "Theme", "Follow your desktop, or pick one.", &["System", "Light", "Dark"], s.theme, d.theme));
@@ -542,6 +563,7 @@ fn set_bool(s: &mut Settings, id: &str, v: bool) {
         "tabs_performance" => s.tabs_performance = v,
         "tabs_docker" => s.tabs_docker = v,
         "tabs_proxy" => s.tabs_proxy = v,
+        "update_check" => s.update_check = v,
         "accent_follow" => s.accent_follow = v,
         "graph_grid" => s.graph_grid = v,
         "show_own_usage" => s.show_own_usage = v,
@@ -665,6 +687,7 @@ fn get_bool(s: &Settings, id: &str) -> Option<bool> {
         "tabs_performance" => s.tabs_performance,
         "tabs_docker" => s.tabs_docker,
         "tabs_proxy" => s.tabs_proxy,
+        "update_check" => s.update_check,
         "accent_follow" => s.accent_follow,
         "graph_grid" => s.graph_grid,
         "show_own_usage" => s.show_own_usage,

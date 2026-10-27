@@ -6,8 +6,9 @@ import { Space, Block, LegendItem } from "space.slint";
 import { SettingsView, SettingsPage, SettingItem } from "settings.slint";
 import { DockerView, DockerPage, DockerRow, DockerKV, DockerHead } from "docker.slint";
 import { ProxyView, ProxyPage, ProxyRow, ProxyKV } from "proxy.slint";
+import { Updates } from "update.slint";
 
-export { Theme, DockerPage, DockerRow, DockerKV, DockerHead, ProxyPage, ProxyRow, ProxyKV, LegendItem, Cols, HeadInfo, SettingsPage, SettingItem, Space, Block, Hover, Marker, Series, ProcRow, ProcDetail, Totals, Link, Tile, PerfDetail, Mini, Segment, Stat, Chart }
+export { Theme, Updates, DockerPage, DockerRow, DockerKV, DockerHead, ProxyPage, ProxyRow, ProxyKV, LegendItem, Cols, HeadInfo, SettingsPage, SettingItem, Space, Block, Hover, Marker, Series, ProcRow, ProcDetail, Totals, Link, Tile, PerfDetail, Mini, Segment, Stat, Chart }
 
 /// The system tray icon. Hover shows a live summary; click opens the window.
 export component Tray inherits SystemTrayIcon {
@@ -230,6 +231,63 @@ export component AppWindow inherits Window {
                                 : "M 20 14.5 A 8.5 8.5 0 1 1 9.5 4 A 6.5 6.5 0 0 0 20 14.5 Z";
                             clicked => {
                                 Theme.mode = Math.mod(Theme.mode + 1, 3);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Update banner (update.rs)
+            if Updates.banner: Rectangle {
+                height: 44px;
+                background: Theme.accent.with-alpha(0.12);
+                Rectangle {
+                    y: parent.height - 1px;
+                    height: 1px;
+                    background: Theme.border;
+                }
+                HorizontalLayout {
+                    padding-left: 18px;
+                    padding-right: 10px;
+                    spacing: 10px;
+                    VerticalLayout {
+                        alignment: center;
+                        Text {
+                            text: Updates.text;
+                            font-size: 12.5px * Theme.font-scale;
+                            color: Theme.text;
+                            overflow: elide;
+                        }
+                    }
+                    Rectangle {
+                        horizontal-stretch: 1;
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        Btn {
+                            text: "What's new";
+                            clicked => {
+                                Updates.notes();
+                            }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        Btn {
+                            primary: true;
+                            text: Updates.action;
+                            clicked => {
+                                Updates.act();
+                            }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        IconButton {
+                            icon: "M 6 6 L 18 18 M 18 6 L 6 18";
+                            tip: "Dismiss";
+                            clicked => {
+                                Updates.dismiss();
                             }
                         }
                     }

@@ -123,6 +123,12 @@ from a user-writable location, so use a native package if you want to turn on
 admin features. There is no Flatpak: its sandbox can't see other apps'
 processes, which is the whole point of a task manager.
 
+Sophon checks GitHub for new releases once a day and shows a banner when one
+exists. **Update now** downloads it, verifies its checksum, and installs it: an
+AppImage replaces itself, a `.deb` / `.rpm` goes through your system's password
+dialog (`pkexec`). It uses the system `curl`. Turn it off in Settings → General →
+Updates; builds with `--no-default-features` don't include it at all.
+
 Releases are built by `.github/workflows/release.yml` when a `vX.Y.Z` tag is
 pushed (the tag must match the version in `Cargo.toml`).
 
