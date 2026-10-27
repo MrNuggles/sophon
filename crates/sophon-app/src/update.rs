@@ -320,6 +320,7 @@ fn curl(net: &Net, url: &str, dest: Option<&Path>, max_bytes: u64, max_secs: u32
         let why = why.lines().last().unwrap_or("").trim().trim_start_matches("curl: ");
         return Err(match out.status.code() {
             Some(6 | 7 | 28) => "Couldn't reach GitHub — are you offline?".to_string(),
+            Some(22) if why.contains("404") => "GitHub has no public release to show (404). If the Sophon repository is private, updates can't be checked.".to_string(),
             _ if why.is_empty() => "The download failed".to_string(),
             _ => format!("The download failed: {why}"),
         });
