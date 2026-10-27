@@ -1,5 +1,9 @@
 [package]
 name = "sophon-app"
+description = "A fast, resource-light task manager for Linux"
+homepage = "https://github.com/MrNuggles/sophon"
+repository = "https://github.com/MrNuggles/sophon"
+authors = ["Shaun Nugent <7701177+MrNuggles@users.noreply.github.com>"]
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -27,3 +31,36 @@ proxy = ["dep:sophon-npm"]
 
 [build-dependencies]
 slint-build = "1.18"
+
+# Native packages (see packaging/build.sh). Libraries Slint loads at runtime
+# are listed by hand because they are dlopen'd, not linked.
+[package.metadata.deb]
+name = "sophon"
+section = "admin"
+priority = "optional"
+extended-description = "Sophon shows running processes, CPU, memory, GPU, disk and network history, a disk-usage treemap, and optional Docker and Nginx Proxy Manager tabs."
+depends = "libc6, libfontconfig1, libxkbcommon0, libgl1, libwayland-client0 | libx11-6"
+recommends = "policykit-1 | polkitd, xdg-utils"
+assets = [
+    ["target/release/sophon", "usr/bin/sophon", "755"],
+    ["../../packaging/sophon.desktop", "usr/share/applications/sophon.desktop", "644"],
+    ["../../packaging/org.sophon.helper.policy", "usr/share/polkit-1/actions/org.sophon.helper.policy", "644"],
+    ["../../packaging/icons/sophon-48.png", "usr/share/icons/hicolor/48x48/apps/sophon.png", "644"],
+    ["../../packaging/icons/sophon-128.png", "usr/share/icons/hicolor/128x128/apps/sophon.png", "644"],
+    ["../../packaging/icons/sophon-256.png", "usr/share/icons/hicolor/256x256/apps/sophon.png", "644"],
+    ["../../README.md", "usr/share/doc/sophon/README.md", "644"],
+]
+
+[package.metadata.generate-rpm]
+name = "sophon"
+summary = "A fast, resource-light task manager for Linux"
+requires = { fontconfig = "*", libxkbcommon = "*", mesa-libGL = "*" }
+assets = [
+    { source = "../../target/release/sophon", dest = "/usr/bin/sophon", mode = "755" },
+    { source = "../../packaging/sophon.desktop", dest = "/usr/share/applications/sophon.desktop", mode = "644" },
+    { source = "../../packaging/org.sophon.helper.policy", dest = "/usr/share/polkit-1/actions/org.sophon.helper.policy", mode = "644" },
+    { source = "../../packaging/icons/sophon-48.png", dest = "/usr/share/icons/hicolor/48x48/apps/sophon.png", mode = "644" },
+    { source = "../../packaging/icons/sophon-128.png", dest = "/usr/share/icons/hicolor/128x128/apps/sophon.png", mode = "644" },
+    { source = "../../packaging/icons/sophon-256.png", dest = "/usr/share/icons/hicolor/256x256/apps/sophon.png", mode = "644" },
+    { source = "../../README.md", dest = "/usr/share/doc/sophon/README.md", mode = "644", doc = true },
+]

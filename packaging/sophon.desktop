@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Sophon
+GenericName=Task Manager
+Comment=See and control what your system is doing
+Exec=sophon
+Icon=sophon
+Terminal=false
+Categories=System;Monitor;
+Keywords=task;process;monitor;cpu;gpu;memory;disk;
+StartupWMClass=sophon

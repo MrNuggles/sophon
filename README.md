@@ -109,6 +109,23 @@ How:
 - When the window is hidden or minimized, sampling drops to every 5 s. On X11 this uses occlusion events; on Wayland it notices that the compositor has stopped presenting frames.
 - Rendering uses Slint's CPU renderer with partial repaints (lighter than a GPU context for a 1 Hz UI).
 
+## Install
+
+Grab a package from the [Releases page](https://github.com/MrNuggles/sophon/releases):
+
+- **Debian / Ubuntu / Mint:** `sudo apt install ./sophon_<version>_amd64.deb`
+- **Fedora / RHEL / openSUSE:** `sudo dnf install ./sophon-<version>-1.x86_64.rpm`
+- **Anything else:** `chmod +x Sophon-<version>-x86_64.AppImage && ./Sophon-<version>-x86_64.AppImage`
+
+The `.deb` and `.rpm` install to `/usr/bin/sophon` with a polkit policy, which is
+what the admin features need (see [SECURITY.md](SECURITY.md)). The AppImage runs
+from a user-writable location, so use a native package if you want to turn on
+admin features. There is no Flatpak: its sandbox can't see other apps'
+processes, which is the whole point of a task manager.
+
+Releases are built by `.github/workflows/release.yml` when a `vX.Y.Z` tag is
+pushed (the tag must match the version in `Cargo.toml`).
+
 ## Build
 
 Needs Rust 1.88+. No `-devel` packages required: fontconfig, Wayland and X11 are loaded at runtime.

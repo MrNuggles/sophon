@@ -1,0 +1,57 @@
+name: Release
+
+# Push a tag like v0.3.0 to build the AppImage, .deb and .rpm and attach them
+# to a GitHub release. "Run workflow" (manual) builds them as downloadable
+# artifacts only, without publishing anything.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    # Oldest LTS runner: the binary links glibc dynamically, so building on an
+    # older glibc keeps it running on older distros.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check tag matches Cargo version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          want="${GITHUB_REF_NAME#v}"
+          have=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          [ "$want" = "$have" ] || { echo "tag $want != Cargo.toml version $have"; exit 1; }
+
+      - name: Install packaging tools
+        run: |
+          cargo install cargo-deb cargo-generate-rpm --locked
+          mkdir -p "$HOME/bin"
+          curl -fsSL -o "$HOME/bin/appimagetool" \
+            https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
+          chmod +x "$HOME/bin/appimagetool"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+
+      - name: Build packages
+        run: packaging/build.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sophon-packages
+          path: dist/*
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "Sophon ${GITHUB_REF_NAME#v}" \
+            --generate-notes
